@@ -1,0 +1,6 @@
+# Development workspace only. Each app and shared package has its own pyproject.toml.
+[tool.uv.workspace]
+members = ["apps/api", "apps/worker", "apps/scheduler", "apps/cli", "packages/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

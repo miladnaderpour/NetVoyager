@@ -1,0 +1,1 @@
+"""NetVoyager worker application."""

@@ -1,0 +1,1 @@
+"""NetVoyager netbox domain package."""

@@ -1,0 +1,1 @@
+"""NetVoyager core domain package."""
