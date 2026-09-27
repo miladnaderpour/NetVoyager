@@ -1,45 +1,99 @@
-"""Shared BGP domain models."""
+# netwoyager-network/netvoyager_network/bgp/models.py
+"""Shared BGP domain models for prefix observations and autonomous systems.
 
-from dataclasses import dataclass
+Importers are responsible for parsing and validating external values before
+constructing these models. Type annotations describe the expected Python
+types; they do not perform runtime conversion or validation.
+"""
+
+from dataclasses import dataclass, field
 from ipaddress import IPv4Network, IPv4Address
 
+from netvoyager_network.bgp.exceptions import DuplicatePrefixError
+
 
 @dataclass(frozen=True, slots=True)
-class AsPrefixes:
-    """IPv4 prefixes observed with the same origin ASN."""
+class AsPrefix:
+    """An observed IPv4 prefix associated with an origin ASN.
+
+    The ASN identifies the attributed origin of the prefix. The optional
+    AS path preserves the sequence provided by the observation source:
+    - None means the path was unavailable or not collected.
+    - An empty tuple means an empty path was observed.
+    - A populated tuple contains the observed ASN sequence.
+
+    Repeated ASNs are preserved because they may represent AS prepending.
+    The model does not derive or verify the origin ASN from the path.
+
+    Equality includes all fields, so observations with different paths are
+    distinct even when their ASN and prefix match.
+    """
 
     asn: int
-    prefixes: tuple[IPv4Network, ...]
-
-@dataclass(frozen=True, slots=True)
-class PrefixAsMatch:
     prefix: IPv4Network
-    origin_as: int | None
- 
+    as_path: tuple[int, ...] | None = None
 
-@dataclass(frozen=True, slots=True)
-class AsSiteEvidence:
-    site: str
-    management_ip: IPv4Address
-    matched_prefix: IPv4Network
+    def contains(self, address: IPv4Address) -> bool:
+        """Return whether the IPv4 address belongs to this prefix.
+
+        This checks membership in this individual network. It does not compare
+        other prefixes or determine whether this is the most specific match.
+        """
+        return address in self.prefix
 
 
-@dataclass(frozen=True, slots=True)
-class AsSiteAssignment:
+@dataclass(slots=True)
+class AutonomousSystem:
+    """An autonomous system with a mutable collection of unique IPv4 prefixes.
+
+    Prefixes are managed through add_prefix() and remove_prefix(). The
+    prefixes property exposes an immutable snapshot for other packages
+    to inspect without modifying the internal collection.
+
+    Uniqueness is based on exact network equality. Overlapping networks
+    remain separate entries, and the same prefix may exist in another AS.
+
+    AS paths belong to individual observations and are not stored here.
+    An association with this model does not establish exclusive ownership
+    of a prefix or prove that the route is currently active.
+    """
+
     asn: int
-    sites: tuple[str, ...]
-    evidence: tuple[AsSiteEvidence, ...]
+    _prefixes: set[IPv4Network] = field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
+    def add_prefix(self, prefix: IPv4Network) -> None:
+        """Associate an IPv4 prefix with this autonomous system.
 
-@dataclass(frozen=True, slots=True)
-class UnresolvedSiteIp:
-    site: str
-    management_ip: IPv4Address
-    reason: str
+        Raise DuplicatePrefixError if the exact prefix already exists.
+        On a duplicate, the existing collection remains unchanged.
 
+        The caller decides whether a duplicate should stop processing,
+        be reported, or be ignored during an import.
+        """
+        if prefix in self._prefixes:
+            raise DuplicatePrefixError(asn=self.asn, prefix=prefix)
 
-@dataclass(frozen=True, slots=True)
-class AsSiteAssignmentResult:
-    assignments: tuple[AsSiteAssignment, ...]
-    unresolved: tuple[UnresolvedSiteIp, ...]
-    skipped_devices: int
+        self._prefixes.add(prefix)
+
+    def remove_prefix(self, prefix: IPv4Network) -> None:
+        """Remove an exact prefix association if it exists.
+
+        A missing prefix leaves the collection unchanged. Removing a
+        supernet does not remove its more-specific prefixes, and removing
+        a subnet does not affect any containing network.
+        """
+        self._prefixes.discard(prefix)
+
+    @property
+    def prefixes(self) -> frozenset[IPv4Network]:
+        """Return an immutable snapshot of the current prefix collection.
+
+        Later additions or removals do not change previously returned
+        snapshots. The collection has no defined display order; callers
+        can sort it when producing reports or exports.
+        """
+        return frozenset(self._prefixes)
