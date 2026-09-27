@@ -7,7 +7,13 @@ name = "netvoyager-import"
 version = "0.1.0"
 description = "NetVoyager import package scaffold"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "netvoyager-network>=0.1,<0.2",
+    "openpyxl>=3.1,<4",
+]
+
+[tool.uv.sources]
+netvoyager-network = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
