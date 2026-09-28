@@ -1,7 +1,8 @@
 """Models for parsed Palo Alto BGP local RIB output."""
 
 from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv4Network
+from datetime import datetime
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from typing import Literal
 
 CollectionState = Literal["pending", "success", "partial", "failed"]

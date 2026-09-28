@@ -28,4 +28,6 @@ apps/web/dist/
 
 # Runtime
 logs/
+output/
+bgp-trace.txt
 *.log

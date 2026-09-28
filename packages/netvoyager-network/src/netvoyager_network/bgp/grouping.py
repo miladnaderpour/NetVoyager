@@ -1,61 +1,75 @@
-"""Group BGP prefixes by their observed origin ASN."""
+"""Build autonomous systems and identify repeated IPv4 prefixes."""
 
 import logging
 from collections.abc import Iterable
 from ipaddress import IPv4Network
-from typing import Protocol
 
-from .models import AsPrefixes
+from .models import AsGroupingResult, AsPrefix, AutonomousSystem
 
 
 logger = logging.getLogger("netvoyager.network.bgp.grouping")
 
 
-class RouteWithAsPath(Protocol):
-    prefix: IPv4Network
-    as_path: tuple[int, ...]
+def group_as_prefixes(
+    records: Iterable[AsPrefix],
+) -> AsGroupingResult:
+    """Organize prefix records into autonomous systems and duplicate groups.
 
+    First group all input records by IPv4Network. For each prefix:
+    - Add the network once to every distinct ASN represented in the group.
+    - If the group contains multiple records, retain all of them in
+      duplicates, including the first occurrence.
 
-def group_prefixes_by_origin_as(
-    routes: Iterable[RouteWithAsPath],
-) -> tuple[AsPrefixes, ...]:
-    """Group route prefixes by the rightmost ASN in their AS path."""
-    prefixes_by_as: dict[int, set[IPv4Network]] = {}
-    route_count = 0
-    local_route_count = 0
+    Duplicate detection depends only on prefix equality. Records with
+    different ASNs or AS paths still belong to the same duplicate group.
+    Overlapping networks with different prefix lengths remain separate.
 
-    for route in routes:
-        route_count += 1
+    Input is consumed once and is not modified. Result dictionaries are
+    ordered by ASN and prefix respectively. Duplicate tuples preserve
+    input encounter order. Empty input returns empty dictionaries.
+    """
+    records_by_prefix: dict[IPv4Network, list[AsPrefix]] = {}
+    record_count = 0
 
-        if not route.as_path:
-            local_route_count += 1
-            continue
+    for record in records:
+        records_by_prefix.setdefault(record.prefix, []).append(record)
+        record_count += 1
 
-        origin_as = route.as_path[-1]
-        prefixes_by_as.setdefault(origin_as, set()).add(route.prefix)
+    systems_by_asn: dict[int, AutonomousSystem] = {}
+    duplicates: dict[IPv4Network, tuple[AsPrefix, ...]] = {}
 
-    groups = tuple(
-        AsPrefixes(
-            asn=asn,
-            prefixes=tuple(
-                sorted(
-                    prefixes,
-                    key=lambda prefix: (
-                        int(prefix.network_address),
-                        prefix.prefixlen,
-                    ),
-                )
-            ),
-        )
-        for asn, prefixes in sorted(prefixes_by_as.items())
+    for prefix in sorted(records_by_prefix):
+        prefix_records = records_by_prefix[prefix]
+        asns = {record.asn for record in prefix_records}
+
+        for asn in sorted(asns):
+            autonomous_system = systems_by_asn.get(asn)
+
+            if autonomous_system is None:
+                autonomous_system = AutonomousSystem(asn=asn)
+                systems_by_asn[asn] = autonomous_system
+
+            autonomous_system.add_prefix(prefix)
+
+        if len(prefix_records) > 1:
+            duplicates[prefix] = tuple(prefix_records)
+
+    result = AsGroupingResult(
+        autonomous_systems={
+            asn: systems_by_asn[asn]
+            for asn in sorted(systems_by_asn)
+        },
+        duplicates=duplicates,
     )
 
     logger.info(
-        "BGP prefixes grouped by origin ASN",
+        "Prefix records organized into autonomous systems",
         extra={
-            "route_count": route_count,
-            "as_count": len(groups),
-            "local_routes_skipped": local_route_count,
+            "record_count": record_count,
+            "as_count": len(result.autonomous_systems),
+            "unique_prefix_count": len(records_by_prefix),
+            "duplicated_prefix_count": len(result.duplicates),
         },
     )
-    return groups
+
+    return result

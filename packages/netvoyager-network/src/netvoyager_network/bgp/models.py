@@ -97,3 +97,25 @@ class AutonomousSystem:
         can sort it when producing reports or exports.
         """
         return frozenset(self._prefixes)
+
+@dataclass(slots=True)
+class AsGroupingResult:
+    """Autonomous systems and repeated prefixes from AsPrefix records.
+
+    autonomous_systems maps each ASN to an AutonomousSystem containing
+    its unique IPv4 prefixes.
+
+    duplicates maps every prefix appearing more than once to all its
+    input records, including the first occurrence. Records may contain
+    the same ASN or different ASNs and preserve their encounter order.
+
+    Duplicate membership reports repetition without deciding whether
+    the input is valid or conflicting.
+    """
+
+    autonomous_systems: dict[int, AutonomousSystem] = field(
+        default_factory=dict
+    )
+    duplicates: dict[IPv4Network, tuple[AsPrefix, ...]] = field(
+        default_factory=dict
+    )
