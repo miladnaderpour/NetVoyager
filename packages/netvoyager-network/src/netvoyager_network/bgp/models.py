@@ -119,3 +119,29 @@ class AsGroupingResult:
     duplicates: dict[IPv4Network, tuple[AsPrefix, ...]] = field(
         default_factory=dict
     )
+
+@dataclass(slots=True)
+class AsPrefixMatchResult:
+    """Best prefix matches and the outcome of a prefix-length check.
+
+    matches contains all retained AsPrefix records at the longest prefix
+    containing the requested address. Records preserve input encounter
+    order, duplicate occurrences, ASNs, and AS paths.
+
+    matched_prefix_length records the best prefix length found before
+    applying the minimum-length policy. None means no prefix matched.
+
+    is_broader_than_expected indicates that the best matching prefix
+    was shorter than the requested minimum. It is False when no minimum
+    was supplied or no prefix matched.
+
+    In flag mode, broad matches remain in matches. In skip mode, matches
+    is empty, but matched_prefix_length and is_broader_than_expected
+    retain the assessment of the skipped matches.
+
+    The result does not select an ASN or resolve ambiguous associations.
+    """
+
+    matches: tuple[AsPrefix, ...] = field(default_factory=tuple)
+    matched_prefix_length: int | None = None
+    is_broader_than_expected: bool = False

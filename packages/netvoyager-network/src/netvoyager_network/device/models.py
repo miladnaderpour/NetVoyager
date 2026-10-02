@@ -1,9 +1,11 @@
-#netvoyager_network/device/models.py
 """Shared device models independent of vendor and inventory source.
 
-Common device attributes are explicit fields. Integration-specific attributes
-are stored in namespaced metadata so importers can enrich a device without
-requiring a separate device model for each source.
+Each device has an internal UUID that remains stable across attribute
+changes and must be preserved when saving and restoring the device.
+
+Common device attributes are explicit fields. Integration-specific
+attributes are stored in namespaced metadata so importers can enrich
+a device without requiring a separate model for each source.
 """
 
 from __future__ import annotations
@@ -12,38 +14,47 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from typing import TypeAlias
+from uuid import UUID, uuid4
 
 from netvoyager_core.exceptions import NetVoyagerError
-
-
-JsonValue: TypeAlias = (
-    str
-    | int
-    | float
-    | bool
-    | None
-    | list["JsonValue"]
-    | dict[str, "JsonValue"]
-)
-
+from netvoyager_core.types import JsonValue as JsonValue
 
 @dataclass(slots=True)
 class NetworkDevice:
-    """A mutable network device shared across NetVoyager packages.
+    """A mutable network device with a stable internal identifier.
 
-    Importers can populate or enrich common attributes as information becomes
-    available. They are responsible for validating external values, matching
-    device identity, and deciding whether existing values should be replaced.
+    device_id identifies the device independently of its name, addresses,
+    serial number, and other attributes. A new UUID is generated when
+    device_id is omitted. Supply the existing UUID when restoring a device.
+
+    Treat device_id as immutable after creation. This convention is not
+    enforced by the dataclass. Persistence code must save and restore it;
+    importers must reuse an existing identity when reconciling records.
+
+    UUID generation does not detect duplicate devices. Two independently
+    constructed devices receive different IDs even when their attributes
+    match. Importers are responsible for matching device identity and
+    deciding whether existing attribute values should be replaced.
+
+    Dataclass equality compares all fields, including device_id. Compare
+    device_id explicitly when checking whether objects represent the same
+    internal identity.
 
     Integration-specific attributes belong in metadata namespaces such as
     "meraki". Metadata is managed through methods and exposed as a detached
     snapshot so callers cannot accidentally modify internal nested values.
 
     Type annotations describe expected values; they do not perform runtime
-    validation or conversion.
+    validation or conversion. Callers restoring an ID from text must convert
+    it to UUID before constructing the device.
     """
 
     name: str
+
+    device_id: UUID = field(
+        default_factory=uuid4,
+        kw_only=True,
+    )
 
     role: str | None = None
     site: str | None = None
@@ -82,9 +93,10 @@ class NetworkDevice:
         Values are deep-copied before storage to isolate the device from
         later changes to the caller's dictionaries or lists.
 
-        An empty or whitespace-only namespace raises NetVoyagerError.
-        Callers must supply JSON-compatible values; this method does not
-        validate or serialize arbitrary Python objects.
+        An invalid namespace raises NetVoyagerError. It must be a nonempty
+        string without surrounding whitespace. Callers must supply
+        JSON-compatible values; this method does not validate or serialize
+        arbitrary Python objects.
         """
         self._validate_namespace(namespace)
         copied_values = deepcopy(values)

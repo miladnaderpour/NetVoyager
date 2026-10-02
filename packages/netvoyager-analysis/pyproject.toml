@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netvoyager-analysis"
+version = "0.1.0"
+description = "Network analysis, correlation, and evidence models for NetVoyager"
+requires-python = ">=3.11"
+dependencies = [
+    "netvoyager-core>=0.1.0",
+    "netvoyager-network>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
