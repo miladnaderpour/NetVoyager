@@ -6,6 +6,7 @@ constructing these models. Type annotations describe the expected Python
 types; they do not perform runtime conversion or validation.
 """
 
+from uuid import UUID, uuid4
 from dataclasses import dataclass, field
 from ipaddress import IPv4Network, IPv4Address
 
@@ -25,10 +26,16 @@ class AsPrefix:
     Repeated ASNs are preserved because they may represent AS prepending.
     The model does not derive or verify the origin ASN from the path.
 
-    Equality includes all fields, so observations with different paths are
-    distinct even when their ASN and prefix match.
+    Equality compares ASN, prefix, and AS path, excluding the ID.
+    Identical observations can therefore compare equal while retaining
+    separate IDs.
     """
 
+    id: UUID = field(
+        default_factory=uuid4,
+        kw_only=True,
+        compare=False,
+    )
     asn: int
     prefix: IPv4Network
     as_path: tuple[int, ...] | None = None
@@ -56,8 +63,17 @@ class AutonomousSystem:
     AS paths belong to individual observations and are not stored here.
     An association with this model does not establish exclusive ownership
     of a prefix or prove that the route is currently active.
+
+    The UUID identifies this object for evidence links. Preserve it when
+    saving and restoring the object, and do not reassign it. Equality
+    compares the ASN and prefix collection, excluding the ID.
     """
 
+    id: UUID = field(
+        default_factory=uuid4,
+        kw_only=True,
+        compare=False,
+    )
     asn: int
     _prefixes: set[IPv4Network] = field(
         default_factory=set,

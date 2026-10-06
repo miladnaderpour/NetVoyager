@@ -1,20 +1,13 @@
-"""Create AS prefix records and evidence directly from parsed BGP routes."""
+"""Create AS prefix records and store evidence from parsed BGP routes."""
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
-from uuid import UUID
 
 from netvoyager_core.logging import get_logger
-from netvoyager_core.types import JsonValue
 from netvoyager_network.bgp.models import AsPrefix
 
-from ..evidence.bgp import (
-    build_bgp_route_evidence_record,
-    get_origin_asn,
-)
-from ..evidence.models import EvidenceRecord, EvidenceSource
-from ..evidence.protocols import BgpRouteObservation
-from .models import BgpRouteProcessingResult, EvidencedAsPrefix
+from ..evidence.models import EvidenceRecord
+from ..evidence.store import EvidenceStore
+from netvoyager_analysis.evidence import BgpRouteObservation
 
 
 logger = get_logger("analysis.bgp.processing")
@@ -23,110 +16,69 @@ logger = get_logger("analysis.bgp.processing")
 def process_bgp_routes(
     routes: Iterable[BgpRouteObservation],
     *,
-    source: EvidenceSource,
-    context: Mapping[str, JsonValue],
-    observed_at: datetime | None = None,
-) -> BgpRouteProcessingResult:
-    """Create AS prefix records and linked evidence from parsed routes.
+    source: str,
+    evidence_store: EvidenceStore,
+    context: Mapping[str, object] | None = None,
+) -> list[AsPrefix]:
+    """Create prefixes and record evidence for each input route.
 
-    Consume the iterable once, preserving encounter order and duplicate
-    occurrences. Do not modify input routes or metadata.
+    Use the last ASN in a nonempty AS path as the origin. Routes with
+    empty or unavailable paths produce evidence only.
 
-    For a known origin, construct AsPrefix directly from the route, then
-    create its evidence and link the two through EvidencedAsPrefix.
-    Origin attribution uses the same helper as the evidence builder.
-
-    For an empty or unavailable AS path, create evidence only and retain
-    its ID in unknown_origin_evidence_ids. No local or placeholder ASN
-    is inferred.
-
-    The producer supplies validated BgpRouteObservation values. The source
-    and context apply to every supplied route, so the caller must separate
-    unrelated routing contexts before processing.
-
-    observed_at is the known collection time, or None when unknown.
-    Empty input produces empty result collections.
-
-    This function does not filter records, group prefixes, create AS
-    objects, or establish scope associations. Debug logs report batch
-    boundaries and individual processing outcomes.
+    Preserve input order and duplicates. Store native Python values in
+    evidence details, including optional routing context.
     """
-    logger.debug(
-        "Starting BGP route processing",
-        extra={
-            "source_reference": source.reference,
-            "routing_context": dict(context),
-        },
-    )
+    records: list[AsPrefix] = []
+    unknown_origins = 0
 
-    records: list[EvidencedAsPrefix] = []
-    evidence_records: list[EvidenceRecord] = []
-    unknown_origin_ids: list[UUID] = []
-    empty_path_count = 0
-    unavailable_path_count = 0
-
-    for route_index, route in enumerate(routes, start=1):
+    for route in routes:
         as_path = route.as_path
-        origin_asn = get_origin_asn(as_path)
-        prefix_record: AsPrefix | None = None
+        origin_asn = as_path[-1] if as_path else None
 
+        record = None
         if origin_asn is not None:
-            prefix_record = AsPrefix(
+            record = AsPrefix(
                 asn=origin_asn,
                 prefix=route.prefix,
                 as_path=as_path,
             )
-        elif as_path is None:
-            unavailable_path_count += 1
+            records.append(record)
         else:
-            empty_path_count += 1
+            unknown_origins += 1
 
-        route_evidence = build_bgp_route_evidence_record(
-            route,
+        evidence = EvidenceRecord(
             source=source,
-            context=context,
-            observed_at=observed_at,
+            details={
+                "prefix": route.prefix,
+                "origin_asn": origin_asn,
+                "as_path": as_path,
+                "next_hop": route.next_hop,
+                "peer": route.peer,
+                "line": route.line_number,
+                "raw_line": route.raw_line,
+                "context": dict(context) if context is not None else {},
+            },
         )
-        evidence_records.append(route_evidence)
+        evidence_store.add(evidence)
 
-        if prefix_record is None:
-            unknown_origin_ids.append(route_evidence.evidence_id)
-        else:
-            records.append(
-                EvidencedAsPrefix(
-                    record=prefix_record,
-                    evidence_id=route_evidence.evidence_id,
-                )
+        if record is not None:
+            evidence_store.link(
+                evidence.id,
+                "as_prefix",
+                record.id,
             )
 
         logger.debug(
-            "BGP route processed",
-            extra={
-                "route_index": route_index,
-                "evidence_id": str(route_evidence.evidence_id),
-                "prefix": str(route.prefix),
-                "asn": origin_asn,
-                "prefix_record_created": prefix_record is not None,
-            },
+            "BGP route processed: prefix=%s, origin_asn=%s, evidence_id=%s",
+            route.prefix,
+            origin_asn,
+            evidence.id,
         )
 
-    result = BgpRouteProcessingResult(
-        records=tuple(records),
-        evidence=tuple(evidence_records),
-        unknown_origin_evidence_ids=tuple(unknown_origin_ids),
+    logger.info(
+        "BGP processing completed: prefixes=%d, unknown_origins=%d",
+        len(records),
+        unknown_origins,
     )
 
-    logger.debug(
-        "BGP route processing completed",
-        extra={
-            "source_reference": source.reference,
-            "routing_context": dict(context),
-            "route_count": len(result.evidence),
-            "prefix_record_count": len(result.records),
-            "unknown_origin_count": len(unknown_origin_ids),
-            "empty_path_count": empty_path_count,
-            "unavailable_path_count": unavailable_path_count,
-        },
-    )
-
-    return result
+    return records
