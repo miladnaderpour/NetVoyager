@@ -1,3 +1,4 @@
+#netwoyager-analysis\src\netvoyager_analysis\evidence\protocols.py
 """Structural contracts for BGP processing and evidence creation.
 
 Vendor models satisfy these protocols through attributes or properties.

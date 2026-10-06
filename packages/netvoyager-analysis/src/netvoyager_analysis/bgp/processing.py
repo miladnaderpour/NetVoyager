@@ -7,7 +7,7 @@ from netvoyager_network.bgp.models import AsPrefix
 
 from ..evidence.models import EvidenceRecord
 from ..evidence.store import EvidenceStore
-from netvoyager_analysis.evidence import BgpRouteObservation
+from .protocols import BgpRouteObservation
 
 
 logger = get_logger("analysis.bgp.processing")
