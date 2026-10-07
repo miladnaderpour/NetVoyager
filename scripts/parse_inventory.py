@@ -15,6 +15,8 @@ from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_core.config import LoggingSettings
 from netvoyager_core.logging import get_logger, setup_logging
 from netvoyager_import.inventory.excel import read_network_devices
+from netvoyager_analysis.devices.scopes import build_site_scopes
+
 
 
 logger = get_logger("scripts.parse_inventory")
@@ -225,6 +227,26 @@ def main() -> None:
         )
 
     logger.info("Log file: %s", log_path.resolve())
+
+    site_scopes = build_site_scopes(devices)
+
+    logger.info(
+        "Site scope analysis: sites=%d, assigned_devices=%d, "
+        "unassigned_devices=%d",
+        len(site_scopes),
+        sum(len(scope.devices) for scope in site_scopes.values()),
+        len(devices) - sum(
+            len(scope.devices)
+            for scope in site_scopes.values()
+        ),
+    )
+
+    for scope in site_scopes.values():
+        logger.debug(
+            "Site scope: id=%s | devices=%d",
+            scope.scope_id,
+            len(scope.devices),
+        )
 
 
 if __name__ == "__main__":
