@@ -16,6 +16,9 @@ from netvoyager_analysis.ipam.processing import (
     analyze_site_prefixes,
     process_network_prefixes,
 )
+from netvoyager_analysis.ipam.asn import (
+    associate_scope_autonomous_systems,
+)
 from netvoyager_analysis.ipam.store import NetworkPrefixStore
 from netvoyager_core.config import LoggingSettings
 from netvoyager_core.logging import get_logger, setup_logging
@@ -479,20 +482,43 @@ def main() -> None:
         total_scope_prefixes,
     )
 
+        #
+    # Correlate site scopes with BGP origin ASNs.
     #
-    # ASN association intentionally remains separate.
-    #
-    total_scope_asns = sum(
-        len(
-            scope.asns
-        )
-        for scope in scopes.values()
+    new_asn_assignments = associate_scope_autonomous_systems(
+        scopes,
+        bgp_result.as_prefixes,
+        bgp_result.autonomous_systems,
+        network_prefix_store=network_prefix_store,
+        finding_store=finding_store,
     )
 
+    total_scope_asns = sum(
+        len(scope.asns)
+        for scope in scopes.values()
+        if scope.kind == "site"
+    )
+
+    unique_site_asns = {
+        asn
+        for scope in scopes.values()
+        if scope.kind == "site"
+        for asn in scope.asns
+    }
+
     logger.info(
-        "Scope ASN assignments: %d "
-        "(ASN association stage not run)",
+        "Site-ASN correlation summary: "
+        "scopes=%d | "
+        "new_assignments=%d | "
+        "scope_asn_assignments=%d | "
+        "unique_asns=%d",
+        sum(
+            scope.kind == "site"
+            for scope in scopes.values()
+        ),
+        new_asn_assignments,
         total_scope_asns,
+        len(unique_site_asns),
     )
 
     #
@@ -521,6 +547,21 @@ def main() -> None:
             kind,
             count,
         )
+
+    #
+    # ASN correlation findings.
+    #
+    logger.info(
+        "ASN correlation findings: "
+        "prefix_multiple_asns=%d | "
+        "asn_multiple_sites=%d | "
+        "site_multiple_asns=%d | "
+        "prefix_multiple_sites=%d",
+        finding_counts["prefix_multiple_asns"],
+        finding_counts["asn_multiple_sites"],
+        finding_counts["site_multiple_asns"],
+        finding_counts["prefix_multiple_sites"],
+    )
 
     #
     # Site-prefix associations.
