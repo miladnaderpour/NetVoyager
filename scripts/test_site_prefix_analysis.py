@@ -1,4 +1,4 @@
-"""Test site-prefix analysis using inventory devices and vpn_intern BGP routes."""
+"""Test canonical site-prefix analysis using inventory and BGP data."""
 
 import argparse
 import json
@@ -12,28 +12,61 @@ from netvoyager_analysis.devices.scopes import build_site_scopes
 from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_analysis.findings.adapters import add_inventory_issues
 from netvoyager_analysis.findings.store import FindingStore
-from netvoyager_analysis.ipam.processing import analyze_site_prefixes
+from netvoyager_analysis.ipam.processing import (
+    analyze_site_prefixes,
+    process_network_prefixes,
+)
+from netvoyager_analysis.ipam.store import NetworkPrefixStore
 from netvoyager_core.config import LoggingSettings
 from netvoyager_core.logging import get_logger, setup_logging
 from netvoyager_import.inventory.excel import read_network_devices
-from netvoyager_paloalto.bgp import parse_loc_rib
+from netvoyager_paloalto.bgp import (
+    parse_bgp_summary,
+    parse_loc_rib,
+)
 
 
 logger = get_logger(
     "netvoyager.scripts.test_site_prefix_analysis"
 )
 
+
 TARGET_VIRTUAL_ROUTER = "vpn_intern"
 DEFAULT_MIN_PREFIX_LENGTH = 16
 
 
-def main() -> None:
-    """Test site-prefix analysis using inventory and vpn_intern BGP routes."""
-    parser = argparse.ArgumentParser(
-        description=(
-            "Test inventory site-prefix analysis using "
-            "the vpn_intern Palo Alto BGP local RIB."
+def _select_router(
+    routers,
+    virtual_router: str,
+):
+    """Return the requested parsed virtual-router section."""
+    router = next(
+        (
+            router
+            for router in routers
+            if router.virtual_router == virtual_router
         ),
+        None,
+    )
+
+    if router is None:
+        available = [
+            router.virtual_router
+            for router in routers
+        ]
+
+        raise ValueError(
+            f"Virtual router {virtual_router!r} was not found. "
+            f"Available routers: {available}"
+        )
+
+    return router
+
+
+def main() -> None:
+    """Test canonical site-prefix analysis end to end."""
+    parser = argparse.ArgumentParser(
+        description=__doc__,
     )
 
     parser.add_argument(
@@ -45,7 +78,20 @@ def main() -> None:
     parser.add_argument(
         "rib",
         type=Path,
-        help="Path to the Palo Alto BGP local RIB text file.",
+        help=(
+            "Path to Palo Alto "
+            "`show routing protocol bgp loc-rib` output."
+        ),
+    )
+
+    parser.add_argument(
+        "--summary",
+        type=Path,
+        required=True,
+        help=(
+            "Path to Palo Alto "
+            "`show routing protocol bgp summary` output."
+        ),
     )
 
     parser.add_argument(
@@ -59,7 +105,7 @@ def main() -> None:
     parser.add_argument(
         "--encoding",
         default="utf-8-sig",
-        help="RIB text encoding (default: utf-8-sig).",
+        help="Input text encoding (default: utf-8-sig).",
     )
 
     parser.add_argument(
@@ -67,9 +113,8 @@ def main() -> None:
         type=int,
         default=DEFAULT_MIN_PREFIX_LENGTH,
         help=(
-            "Minimum BGP prefix length eligible for site association "
-            f"(default: {DEFAULT_MIN_PREFIX_LENGTH}). "
-            "Broader matches are rejected."
+            "Minimum prefix length eligible for site association "
+            f"(default: {DEFAULT_MIN_PREFIX_LENGTH})."
         ),
     )
 
@@ -115,7 +160,9 @@ def main() -> None:
                         "output": "file",
                         "level": level,
                         "format": "text",
-                        "file_path": str(log_path),
+                        "file_path": str(
+                            log_path
+                        ),
                     },
                 ]
             )
@@ -130,6 +177,10 @@ def main() -> None:
         args.rib.resolve()
     )
 
+    summary_source = str(
+        args.summary.resolve()
+    )
+
     logger.info(
         "Inventory source: %s",
         inventory_source,
@@ -141,6 +192,11 @@ def main() -> None:
     )
 
     logger.info(
+        "BGP summary source: %s",
+        summary_source,
+    )
+
+    logger.info(
         "Target virtual router: %s",
         TARGET_VIRTUAL_ROUTER,
     )
@@ -149,12 +205,6 @@ def main() -> None:
         "Minimum site prefix length: /%d",
         args.min_prefix_length,
     )
-
-    if args.sheet is not None:
-        logger.info(
-            "Inventory worksheet: %s",
-            args.sheet,
-        )
 
     #
     # Read inventory.
@@ -174,31 +224,31 @@ def main() -> None:
 
     logger.info(
         "Inventory parsed: observations=%d, issues=%d",
-        len(inventory_result.observations),
-        len(inventory_result.issues),
+        len(
+            inventory_result.observations
+        ),
+        len(
+            inventory_result.issues
+        ),
     )
 
     #
-    # Shared evidence and finding stores.
+    # Shared stores.
     #
     evidence_store = EvidenceStore()
     finding_store = FindingStore()
+    network_prefix_store = NetworkPrefixStore()
 
     #
-    # Convert inventory import issues into findings.
+    # Inventory findings.
     #
     add_inventory_issues(
         inventory_result.issues,
         finding_store=finding_store,
     )
 
-    logger.info(
-        "Inventory findings imported: %d",
-        len(finding_store.findings),
-    )
-
     #
-    # Create NetworkDevice objects.
+    # Build NetworkDevice objects.
     #
     inventory_context: dict[
         str,
@@ -219,11 +269,13 @@ def main() -> None:
 
     logger.info(
         "Inventory devices created: %d",
-        len(devices),
+        len(
+            devices
+        ),
     )
 
     #
-    # Build baseline site scopes from inventory.
+    # Build baseline site scopes.
     #
     scopes = build_site_scopes(
         devices
@@ -231,15 +283,17 @@ def main() -> None:
 
     logger.info(
         "Baseline site scopes created: %d",
-        len(scopes),
+        len(
+            scopes
+        ),
     )
 
     #
-    # Read Palo Alto BGP local RIB.
+    # Read BGP local RIB.
     #
     try:
         raw_rib = args.rib.read_text(
-            encoding=args.encoding,
+            encoding=args.encoding
         )
     except (
         OSError,
@@ -250,9 +304,6 @@ def main() -> None:
             f"Cannot read BGP RIB: {exc}"
         )
 
-    #
-    # Parse virtual-router sections.
-    #
     try:
         rib_result = parse_loc_rib(
             raw_rib
@@ -262,54 +313,74 @@ def main() -> None:
             f"Cannot parse BGP RIB: {exc}"
         )
 
-    logger.info(
-        "BGP virtual-router sections parsed: %d",
-        len(rib_result.routers),
-    )
-
-    available_routers = [
-        router.virtual_router
-        for router in rib_result.routers
-    ]
-
-    logger.info(
-        "Available virtual routers: %s",
-        available_routers,
-    )
-
-    #
-    # Use vpn_intern only.
-    #
-    router = next(
-        (
-            router
-            for router in rib_result.routers
-            if router.virtual_router
-            == TARGET_VIRTUAL_ROUTER
-        ),
-        None,
-    )
-
-    if router is None:
+    try:
+        router = _select_router(
+            rib_result.routers,
+            TARGET_VIRTUAL_ROUTER,
+        )
+    except ValueError as exc:
         parser.error(
-            f"Virtual router {TARGET_VIRTUAL_ROUTER!r} "
-            f"was not found. "
-            f"Available routers: {available_routers}"
+            str(exc)
         )
 
     logger.info(
         "Using virtual router: %s | routes=%d",
         router.virtual_router,
-        len(router.routes),
+        len(
+            router.routes
+        ),
     )
 
     #
-    # Convert vpn_intern routes into AsPrefix objects.
+    # Read BGP summary and obtain local ASN.
     #
-    prefixes = process_bgp_routes(
+    try:
+        raw_summary = args.summary.read_text(
+            encoding=args.encoding
+        )
+    except (
+        OSError,
+        UnicodeError,
+        LookupError,
+    ) as exc:
+        parser.error(
+            f"Cannot read BGP summary: {exc}"
+        )
+
+    try:
+        bgp_summary = parse_bgp_summary(
+            raw_summary
+        )
+    except ValueError as exc:
+        parser.error(
+            f"Cannot parse BGP summary: {exc}"
+        )
+
+    if (
+        bgp_summary.virtual_router
+        != router.virtual_router
+    ):
+        parser.error(
+            "BGP summary virtual router does not match "
+            "the selected RIB virtual router: "
+            f"{bgp_summary.virtual_router!r} != "
+            f"{router.virtual_router!r}"
+        )
+
+    logger.info(
+        "BGP summary: virtual_router=%s | local_asn=%s",
+        bgp_summary.virtual_router,
+        bgp_summary.local_asn,
+    )
+
+    #
+    # Process BGP observations.
+    #
+    bgp_result = process_bgp_routes(
         router.routes,
         source=rib_source,
         evidence_store=evidence_store,
+        local_asn=bgp_summary.local_asn,
         context={
             "virtual_router": (
                 router.virtual_router
@@ -320,52 +391,107 @@ def main() -> None:
         },
     )
 
-    unknown_origins = (
-        len(router.routes)
-        - len(prefixes)
+    logger.info(
+        "BGP processing: "
+        "routes=%d | "
+        "as_prefixes=%d | "
+        "autonomous_systems=%d | "
+        "local_routes=%d | "
+        "unknown_origins=%d",
+        len(
+            router.routes
+        ),
+        len(
+            bgp_result.as_prefixes
+        ),
+        len(
+            bgp_result.autonomous_systems
+        ),
+        bgp_result.local_route_count,
+        bgp_result.unknown_origin_count,
+    )
+
+    #
+    # Canonicalize BGP prefixes into NetworkPrefix.
+    #
+    network_prefixes = process_network_prefixes(
+        bgp_result.as_prefixes,
+        network_prefix_store=network_prefix_store,
+        evidence_store=evidence_store,
     )
 
     logger.info(
-        "BGP totals for %s: routes=%d, prefixes=%d, "
-        "unknown_origins=%d",
-        router.virtual_router,
-        len(router.routes),
-        len(prefixes),
-        unknown_origins,
+        "Canonical IPAM prefixes: "
+        "as_prefixes=%d | "
+        "network_prefixes=%d | "
+        "store_size=%d",
+        len(
+            bgp_result.as_prefixes
+        ),
+        len(
+            network_prefixes
+        ),
+        len(
+            network_prefix_store
+        ),
     )
 
     #
-    # Perform initial BGP-based site-prefix analysis.
+    # Associate device management IPs with canonical NetworkPrefix objects.
     #
     analysis_result = analyze_site_prefixes(
         devices,
-        prefixes,
         scopes,
         finding_store=finding_store,
+        network_prefix_store=network_prefix_store,
         min_prefix_length=args.min_prefix_length,
     )
 
     #
-    # Scope totals after analysis.
+    # Scope totals.
     #
     total_scope_prefixes = sum(
-        len(scope.prefixes)
-        for scope in scopes.values()
-    )
-
-    total_scope_asns = sum(
-        len(scope.asns)
+        len(
+            scope.prefix_ids
+        )
         for scope in scopes.values()
     )
 
     logger.info(
-        "IPAM analysis summary: associations=%d, "
-        "matched_devices=%d, "
-        "scope_prefix_assignments=%d, "
-        "scope_asn_assignments=%d",
-        len(analysis_result.associations),
-        len(analysis_result.matched_devices),
+        "Site-prefix analysis summary: "
+        "scopes=%d | "
+        "associations=%d | "
+        "matched_devices=%d | "
+        "canonical_prefixes=%d | "
+        "scope_prefix_assignments=%d",
+        len(
+            scopes
+        ),
+        len(
+            analysis_result.associations
+        ),
+        len(
+            analysis_result.matched_devices
+        ),
+        len(
+            network_prefix_store
+        ),
         total_scope_prefixes,
+    )
+
+    #
+    # ASN association intentionally remains separate.
+    #
+    total_scope_asns = sum(
+        len(
+            scope.asns
+        )
+        for scope in scopes.values()
+    )
+
+    logger.info(
+        "Scope ASN assignments: %d "
+        "(ASN association stage not run)",
         total_scope_asns,
     )
 
@@ -378,9 +504,13 @@ def main() -> None:
     )
 
     logger.info(
-        "Finding totals: total=%d, kinds=%d",
-        len(finding_store.findings),
-        len(finding_counts),
+        "Finding totals: total=%d | kinds=%d",
+        len(
+            finding_store.findings
+        ),
+        len(
+            finding_counts
+        ),
     )
 
     for kind, count in sorted(
@@ -400,13 +530,13 @@ def main() -> None:
             "ASSOCIATION: "
             "site=%s | "
             "prefix=%s | "
-            "asn=%s | "
             "devices=%d | "
             "prefix_id=%s",
             association.site,
             association.prefix.prefix,
-            association.prefix.asn,
-            len(association.devices),
+            len(
+                association.devices
+            ),
             association.prefix.id,
         )
 
@@ -431,48 +561,70 @@ def main() -> None:
         )
 
     #
-    # Detailed site summaries when debug logging is enabled.
+    # Detailed site summaries.
     #
     for scope in scopes.values():
-        if (
-            not scope.prefixes
-            and not scope.asns
-        ):
+        if not scope.prefix_ids:
             continue
 
         logger.debug(
-            "SITE: %s | devices=%d | prefixes=%d | asns=%d",
+            "SITE: %s | devices=%d | prefixes=%d",
             scope.scope_id,
-            len(scope.devices),
-            len(scope.prefixes),
-            len(scope.asns),
+            len(
+                scope.devices
+            ),
+            len(
+                scope.prefix_ids
+            ),
         )
 
-        for prefix in sorted(
-            scope.prefixes
-        ):
-            logger.debug(
-                "  PREFIX: site=%s | prefix=%s",
-                scope.scope_id,
-                prefix,
+        site_prefixes = [
+            network_prefix_store.get(
+                prefix_id
             )
+            for prefix_id in scope.prefix_ids
+        ]
 
-        for asn in sorted(
-            scope.asns
+        site_prefixes = [
+            network_prefix
+            for network_prefix in site_prefixes
+            if network_prefix is not None
+        ]
+
+        for network_prefix in sorted(
+            site_prefixes,
+            key=lambda item: (
+                int(
+                    item.prefix.network_address
+                ),
+                item.prefix.prefixlen,
+            ),
         ):
             logger.debug(
-                "  ASN: site=%s | asn=%d",
+                "  PREFIX: site=%s | prefix=%s | prefix_id=%s",
                 scope.scope_id,
-                asn,
+                network_prefix.prefix,
+                network_prefix.id,
             )
 
     #
-    # Final evidence totals.
+    # Final totals.
     #
     logger.info(
-        "Evidence totals: records=%d, relations=%d",
-        len(evidence_store.records),
-        len(evidence_store.relations),
+        "NetworkPrefix store totals: prefixes=%d",
+        len(
+            network_prefix_store
+        ),
+    )
+
+    logger.info(
+        "Evidence totals: records=%d | relations=%d",
+        len(
+            evidence_store.records
+        ),
+        len(
+            evidence_store.relations
+        ),
     )
 
     logger.info(

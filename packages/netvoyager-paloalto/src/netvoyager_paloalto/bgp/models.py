@@ -8,7 +8,17 @@ from typing import Literal
 CollectionState = Literal["pending", "success", "partial", "failed"]
 
 
+@dataclass(frozen=True, slots=True)
+class BgpSummary:
+    """Parsed Palo Alto BGP summary for one virtual router.
 
+    The summary describes the local BGP process and selected peer state.
+    Values not present in the source output remain None.
+    """
+
+    virtual_router: str
+    router_id: IPv4Address | None
+    local_asn: int | None
 
 @dataclass(frozen=True, slots=True)
 class BgpRoute:

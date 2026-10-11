@@ -21,7 +21,6 @@ from netvoyager_network.scope.exceptions import (
     DuplicateScopePrefixError,
 )
 
-
 @dataclass(slots=True)
 class NetworkScope:
     """A logical grouping with direct device, ASN, and prefix associations.
@@ -67,11 +66,12 @@ class NetworkScope:
         init=False,
         repr=False,
     )
-    _prefixes: set[IPv4Network] = field(
+    _prefix_ids: set[UUID] = field(
         default_factory=set,
         init=False,
         repr=False,
     )
+
     _devices: dict[UUID, NetworkDevice] = field(
         default_factory=dict,
         init=False,
@@ -113,47 +113,43 @@ class NetworkScope:
         """
         return frozenset(self._asns)
 
-    def add_prefix(self, prefix: IPv4Network) -> None:
-        """Assign an IPv4 prefix directly to this scope.
+    def add_prefix(self, prefix_id: UUID) -> None:
+        """Associate a network prefix directly with this scope.
 
-        Raise DuplicateScopePrefixError if the exact prefix already exists.
-        Overlapping prefixes are distinct and are not rejected here.
+        Raise DuplicateScopePrefixError if the prefix ID is already
+        associated. A duplicate leaves the collection unchanged.
 
         This operation does not inspect other scopes, establish device or
         ASN associations, or modify parent and child scopes. Cross-scope
-        checks must be performed by the registry before calling this method.
+        checks must be performed outside this model.
         """
-        if prefix in self._prefixes:
+        if prefix_id in self._prefix_ids:
             raise DuplicateScopePrefixError(
                 scope_id=self.scope_id,
-                prefix=prefix,
+                prefix_id=prefix_id,
             )
 
-        self._prefixes.add(prefix)
+        self._prefix_ids.add(prefix_id)
 
-    def remove_prefix(self, prefix: IPv4Network) -> None:
-        """Remove an exact direct prefix assignment if it exists.
+    def remove_prefix(self, prefix_id: UUID) -> None:
+        """Remove a direct network prefix association if it exists.
 
-        A missing prefix leaves the collection unchanged. Removing a
-        supernet does not remove more-specific prefixes, and removing
-        a subnet does not affect a containing network.
+        A missing prefix ID leaves the collection unchanged.
 
         Device and ASN associations, and assignments in other scopes,
         are unaffected.
         """
-        self._prefixes.discard(prefix)
+        self._prefix_ids.discard(prefix_id)
 
     @property
-    def prefixes(self) -> frozenset[IPv4Network]:
-        """Return an immutable snapshot of directly assigned prefixes.
+    def prefix_ids(self) -> frozenset[UUID]:
+        """Return an immutable snapshot of associated network prefix IDs.
 
-        The snapshot excludes descendant assignments and does not aggregate
-        or collapse networks. Callers can sort it for reports or exports.
-
-        Later changes to the scope do not alter previously returned
-        snapshots.
+        The snapshot excludes descendant assignments and has no defined
+        display order. Later changes to the scope do not alter previously
+        returned snapshots.
         """
-        return frozenset(self._prefixes)
+        return frozenset(self._prefix_ids)
 
     def add_device(self, device: NetworkDevice) -> None:
         """Associate a device directly with this scope using its device ID.

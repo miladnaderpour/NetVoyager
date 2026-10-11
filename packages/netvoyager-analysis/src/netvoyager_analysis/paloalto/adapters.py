@@ -1,3 +1,4 @@
+#netvoyager-analysis/netvoyager_analysis/paloalto/adapters.py
 """Adapters for Palo Alto Panorama observations."""
 
 from dataclasses import dataclass

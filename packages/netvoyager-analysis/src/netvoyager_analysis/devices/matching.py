@@ -15,6 +15,7 @@ logger = get_logger("netvoyager.analysis.devices.matching")
 
 MatchMethod = Literal[
     "serial",
+    "serial_without_leading_zero",
     "hostname",
     "management_ip",
     "hostname+management_ip",
@@ -56,6 +57,30 @@ def _normalize_text(value: str | None) -> str | None:
 
     return value.casefold() if value else None
 
+def _serial_without_leading_zero(
+    value: str | None,
+) -> str | None:
+    """Return a numeric serial with one leading zero removed.
+
+    The fallback is intended for source systems that converted a numeric
+    serial number and therefore lost one leading zero.
+
+    Non-numeric serial numbers and serials without a leading zero do not
+    produce a fallback value.
+    """
+    normalized = _normalize_text(
+        value
+    )
+
+    if (
+        normalized is None
+        or not normalized.isdigit()
+        or not normalized.startswith("0")
+        or len(normalized) <= 1
+    ):
+        return None
+
+    return normalized[1:]
 
 def _unique_devices(
     devices: Iterable[NetworkDevice],
@@ -105,7 +130,9 @@ def match_devices(
             for device in device_list
             if (
                 serial is not None
-                and _normalize_text(device.serial_number) == serial
+                and _normalize_text(
+                    device.serial_number
+                ) == serial
             )
         ]
 
@@ -115,6 +142,7 @@ def match_devices(
                 device=serial_matches[0],
                 matched_by="serial",
             )
+
             matches.append(match)
 
             logger.debug(
@@ -132,6 +160,56 @@ def match_devices(
                     observation=observation,
                     reason="Serial number matches multiple devices",
                     candidates=tuple(serial_matches),
+                )
+            )
+            continue
+
+        fallback_serial = _serial_without_leading_zero(
+            observation.serial_number
+        )
+
+        fallback_serial_matches = [
+            device
+            for device in device_list
+            if (
+                fallback_serial is not None
+                and _normalize_text(
+                    device.serial_number
+                ) == fallback_serial
+            )
+        ]
+
+        if len(fallback_serial_matches) == 1:
+            match = DeviceMatch(
+                observation=observation,
+                device=fallback_serial_matches[0],
+                matched_by="serial_without_leading_zero",
+            )
+
+            matches.append(match)
+
+            logger.debug(
+                "Device matched by serial without leading zero: "
+                "observed_serial=%s | inventory_serial=%s | "
+                "device=%s | device_id=%s",
+                observation.serial_number,
+                match.device.serial_number,
+                match.device.name,
+                match.device.device_id,
+            )
+            continue
+
+        if len(fallback_serial_matches) > 1:
+            unresolved.append(
+                UnresolvedDeviceMatch(
+                    observation=observation,
+                    reason=(
+                        "Serial number without leading zero "
+                        "matches multiple devices"
+                    ),
+                    candidates=tuple(
+                        fallback_serial_matches
+                    ),
                 )
             )
             continue

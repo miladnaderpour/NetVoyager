@@ -1,408 +1,586 @@
-"""Check a Palo Alto BGP RIB and optionally match inventory sites to ASNs."""
+"""Check Palo Alto BGP parsing and BGP analysis processing.
+
+Validate the complete BGP flow:
+
+Palo Alto local RIB
+    -> parse_loc_rib()
+
+Palo Alto BGP summary
+    -> parse_bgp_summary()
+    -> local ASN
+
+Parsed routes + local ASN
+    -> process_bgp_routes()
+    -> AsPrefix
+    -> AutonomousSystem
+    -> Evidence
+
+The script does not create NetworkPrefix objects or perform site analysis.
+"""
 
 import argparse
 import json
-from collections import defaultdict
-from ipaddress import IPv4Network
+from datetime import datetime
 from pathlib import Path
 
+from netvoyager_analysis.bgp.processing import process_bgp_routes
+from netvoyager_analysis.ipam.processing import (
+    process_network_prefixes,
+)
+from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_core.config import LoggingSettings
 from netvoyager_core.logging import get_logger, setup_logging
-from netvoyager_import.inventory.excel import (
-    InventoryReadResult,
-    read_network_devices,
+from netvoyager_paloalto.bgp.parser import (
+    parse_bgp_summary,
+    parse_loc_rib,
 )
-from netvoyager_network.bgp.filtering import filter_as_prefixes
-from netvoyager_network.bgp.grouping import group_prefixes_by_origin_as
-from netvoyager_network.bgp.models import AsSiteAssignmentResult
-from netvoyager_network.bgp.site_assignment import assign_sites_to_asns
-from netvoyager_paloalto.bgp.models import BgpRibResult, UnparsedLine
-from netvoyager_paloalto.bgp.parser import parse_loc_rib
-from netvoyager_network.bgp.models import AsPrefixes, AsSiteAssignmentResult
+from netvoyager_analysis.ipam.store import NetworkPrefixStore
+
+logger = get_logger(
+    "scripts.check_bgp_rib"
+)
 
 
-SCOPE = IPv4Network("10.0.0.0/8")
-logger = get_logger("scripts.check_bgp_rib")
+def _select_router(
+    routers,
+    name: str | None,
+):
+    """Select exactly one virtual-router section.
 
+    Automatically select the only section when the input contains one
+    virtual router.
 
-def _log_unparsed(
-    label: str,
-    lines: tuple[UnparsedLine, ...],
-    limit: int = 10,
-) -> None:
-    if not lines:
-        return
+    When multiple sections exist, require the caller to identify the
+    desired virtual router explicitly.
+    """
+    if name is None:
+        if len(routers) == 1:
+            return routers[0]
 
-    logger.warning(
-        "Unparsed RIB lines found",
-        extra={"section": label, "unparsed_count": len(lines)},
+        available = ", ".join(
+            router.virtual_router
+            for router in routers
+        )
+
+        raise ValueError(
+            "Multiple virtual-router sections were found. "
+            "Use --virtual-router to select one. "
+            f"Available: {available}"
+        )
+
+    matches = [
+        router
+        for router in routers
+        if router.virtual_router == name
+    ]
+
+    if len(matches) == 1:
+        return matches[0]
+
+    available = ", ".join(
+        router.virtual_router
+        for router in routers
     )
 
-    for item in lines[:limit]:
-        logger.warning(
-            "Unparsed RIB line",
-            extra={
-                "section": label,
-                "line_number": item.line_number,
-                "reason": item.reason,
-            },
+    raise ValueError(
+        f"Virtual router {name!r} was not found uniquely. "
+        f"Available: {available}"
+    )
+
+
+def _resolve_local_asn(
+    *,
+    manual_local_asn: int | None,
+    summary_path: Path | None,
+    encoding: str,
+    virtual_router: str,
+) -> tuple[int | None, str]:
+    """Resolve the local ASN from manual input or BGP summary.
+
+    Explicit manual input takes precedence over the summary file.
+
+    Return the resolved ASN and a short description of its source.
+    """
+    if manual_local_asn is not None:
+        return (
+            manual_local_asn,
+            "manual",
         )
 
-    if len(lines) > limit:
-        logger.warning(
-            "Additional unparsed RIB lines omitted",
-            extra={
-                "section": label,
-                "omitted_count": len(lines) - limit,
-            },
+    if summary_path is None:
+        return (
+            None,
+            "not supplied",
         )
 
+    try:
+        summary_text = summary_path.read_text(
+            encoding=encoding
+        )
+    except (
+        OSError,
+        UnicodeError,
+        LookupError,
+    ) as exc:
+        raise ValueError(
+            f"Cannot read BGP summary file: {exc}"
+        ) from exc
 
-def _log_inventory(inventory: InventoryReadResult) -> None:
+    summary = parse_bgp_summary(
+        summary_text
+    )
+
+    if summary.virtual_router != virtual_router:
+        raise ValueError(
+            "BGP summary virtual router does not match "
+            "the selected local-RIB virtual router: "
+            f"{summary.virtual_router!r} != {virtual_router!r}"
+        )
+
+    return (
+        summary.local_asn,
+        "BGP summary",
+    )
+
+
+def _log_local_as_prefixes(
+    result,
+) -> None:
+    """Log AsPrefix objects created from local BGP routes."""
+    local_prefixes = []
+
+    for as_prefix in result.as_prefixes:
+        if as_prefix.as_path == ():
+            local_prefixes.append(
+                as_prefix
+            )
+
     logger.info(
-        "Inventory summary",
+        "Local AsPrefix observations",
         extra={
-            "device_count": len(inventory.devices),
-            "issue_count": len(inventory.issues),
-            "distinct_management_ips": len(inventory.ip_sites_mapping),
+            "count": len(
+                local_prefixes
+            )
         },
     )
 
-    for ip, sites in sorted(
-        inventory.ip_sites_mapping.items(),
-        key=lambda item: int(item[0]),
-    ):
-        site_refs = sorted(sites)
+    for as_prefix in local_prefixes:
+        logger.info(
+            "Local AsPrefix",
+            extra={
+                "prefix": str(
+                    as_prefix.prefix
+                ),
+                "asn": as_prefix.asn,
+                "as_path": list(
+                    as_prefix.as_path
+                ),
+                "id": str(
+                    as_prefix.id
+                ),
+            },
+        )
 
+
+def _log_autonomous_systems(
+    result,
+) -> None:
+    """Log a compact summary of generated autonomous systems."""
+    logger.info(
+        "Autonomous systems",
+        extra={
+            "count": len(
+                result.autonomous_systems
+            )
+        },
+    )
+
+    for autonomous_system in result.autonomous_systems:
         logger.debug(
-            "Inventory management IP",
+            "Autonomous system",
             extra={
-                "management_ip": str(ip),
-                "site_refs": site_refs,
-            },
-        )
-
-        if len(site_refs) > 1:
-            logger.warning(
-                "Management IP appears under multiple sites",
-                extra={
-                    "management_ip": str(ip),
-                    "site_refs": site_refs,
-                },
-            )
-
-    for issue in inventory.issues:
-        # The conflict is already logged once per IP above.
-        if issue.reason == "Management IP appears under multiple sites":
-            continue
-
-        logger.warning(
-            "Inventory row issue",
-            extra={
-                "row_number": issue.row_number,
-                "reason": issue.reason,
-            },
-        )
-
-
-def _log_unresolved(result: AsSiteAssignmentResult) -> None:
-    for item in result.unresolved:
-        logger.warning(
-            "Inventory IP could not establish an ASN-to-site link",
-            extra={
-                "site_ref": item.site,
-                "management_ip": str(item.management_ip),
-                "reason": item.reason,
-            },
-        )
-
-
-def _log_site_conflicts(result: AsSiteAssignmentResult) -> None:
-    asns_by_site: dict[str, set[int]] = defaultdict(set)
-
-    for assignment in result.assignments:
-        for site in assignment.sites:
-            asns_by_site[site].add(assignment.asn)
-
-    for site, asns in sorted(asns_by_site.items()):
-        if len(asns) > 1:
-            logger.warning(
-                "Site matched multiple origin ASNs",
-                extra={
-                    "site_ref": site,
-                    "origin_asns": sorted(asns),
-                },
-            )
-
-
-def _log_final_asn_report(
-    router: BgpRibResult,
-    groups: tuple[AsPrefixes, ...],
-    assignment_result: AsSiteAssignmentResult | None,
-    inventory: InventoryReadResult | None,
-) -> None:
-    assignments = (
-        {item.asn: item for item in assignment_result.assignments}
-        if assignment_result is not None
-        else {}
-    )
-
-    logger.info(
-        "Final ASN report started",
-        extra={
-            "router_name": router.virtual_router,
-            "asn_count": len(groups),
-        },
-    )
-
-    for group in groups:
-        assignment = assignments.get(group.asn)
-        sites = assignment.sites if assignment is not None else ()
-
-        evidence = []
-        if assignment is not None:
-            for item in assignment.evidence:
-                known_sites = (
-                    inventory.ip_sites_mapping.get(item.management_ip, ())
-                    if inventory is not None
-                    else ()
-                )
-                evidence.append({
-                    "site_ref": item.site,
-                    "management_ip": str(item.management_ip),
-                    "matched_route": str(item.matched_prefix),
-                    "cross_site_ip": len(known_sites) > 1,
-                })
-
-        logger.info(
-            "Final ASN report entry",
-            extra={
-                "router_name": router.virtual_router,
-                "origin_asn": group.asn,
-                "site_refs": list(sites),
-                "site_status": (
-                    "not_checked"
-                    if inventory is None
-                    else "unassigned"
-                    if not sites
-                    else "single_site"
-                    if len(sites) == 1
-                    else "multiple_sites_review"
+                "asn": autonomous_system.asn,
+                "prefix_count": len(
+                    autonomous_system.prefixes
                 ),
-                "prefixes": [str(prefix) for prefix in group.prefixes],
-                "site_evidence": evidence,
-            },
-        )
-
-    logger.info(
-        "Final ASN report completed",
-        extra={
-            "router_name": router.virtual_router,
-            "asn_count": len(groups),
-        },
-    )
-
-
-
-def _log_router(
-    number: int,
-    router: BgpRibResult,
-    inventory: InventoryReadResult | None,
-    show_prefixes: bool,
-) -> None:
-    parsed = len(router.routes)
-    reported = router.total_routes_shown
-
-    if reported is None:
-        status = "NO FOOTER"
-    elif parsed == reported:
-        status = "OK"
-    else:
-        status = "MISMATCH"
-
-    log_router = logger.info if status == "OK" else logger.warning
-    log_router(
-        "BGP router section checked",
-        extra={
-            "section_number": number,
-            "router_name": router.virtual_router,
-            "router_id": router.virtual_router_id,
-            "parsed_routes": parsed,
-            "reported_routes": reported,
-            "status": status,
-        },
-    )
-    _log_unparsed(router.virtual_router, router.unparsed_lines)
-
-    groups = filter_as_prefixes(
-        group_prefixes_by_origin_as(router.routes),
-        SCOPE,
-    )
-    prefix_count = sum(len(group.prefixes) for group in groups)
-
-    logger.info(
-        "BGP prefixes within scope",
-        extra={
-            "router_name": router.virtual_router,
-            "scope": str(SCOPE),
-            "origin_asn_count": len(groups),
-            "asn_prefix_entry_count": prefix_count,
-        },
-    )
-
-    assignment_result = None
-    sites_by_asn: dict[int, tuple[str, ...]] = {}
-
-    if inventory is not None:
-        assignment_result = assign_sites_to_asns(
-            devices=inventory.devices,
-            routes=router.routes,
-            scope=SCOPE,
-        )
-        sites_by_asn = {
-            assignment.asn: assignment.sites
-            for assignment in assignment_result.assignments
-        }
-
-    for group in groups:
-        sites = sites_by_asn.get(group.asn, ())
-
-        logger.info(
-            "Origin ASN prefix group",
-            extra={
-                "router_name": router.virtual_router,
-                "origin_asn": group.asn,
-                "prefix_count": len(group.prefixes),
-                "site_refs": list(sites),
-                "site_status": (
-                    "not_checked"
-                    if inventory is None
-                    else "unassigned"
-                    if not sites
-                    else "single_site"
-                    if len(sites) == 1
-                    else "multiple_sites_review"
+                "id": str(
+                    autonomous_system.id
                 ),
             },
         )
 
-        if show_prefixes:
-            for prefix in group.prefixes:
-                logger.info(
-                    "Origin ASN prefix",
-                    extra={
-                        "router_name": router.virtual_router,
-                        "origin_asn": group.asn,
-                        "prefix": str(prefix),
-                    },
-                )
-
-    if assignment_result is None:
-        return
-
-    logger.info(
-        "Inventory matching summary",
-        extra={
-            "router_name": router.virtual_router,
-            "asns_with_site_evidence": len(assignment_result.assignments),
-            "unresolved_ip_count": len(assignment_result.unresolved),
-            "skipped_device_count": assignment_result.skipped_devices,
-        },
-    )
-
-    for assignment in assignment_result.assignments:
-        for evidence in assignment.evidence:
-            logger.info(
-                "ASN-to-site evidence",
-                extra={
-                    "router_name": router.virtual_router,
-                    "origin_asn": assignment.asn,
-                    "site_ref": evidence.site,
-                    "management_ip": str(evidence.management_ip),
-                    "matched_prefix": str(evidence.matched_prefix),
-                },
-            )
-
-    _log_unresolved(assignment_result)
-    _log_site_conflicts(assignment_result)
-    _log_final_asn_report(router, groups, assignment_result, inventory)
 
 def main() -> None:
+    """Run the Palo Alto BGP processing integration check."""
     parser = argparse.ArgumentParser(
-        description="Check a Palo Alto BGP local RIB and match inventory sites."
+        description=__doc__,
     )
+
     parser.add_argument(
-        "file",
+        "rib",
         type=Path,
-        help="Path to a local RIB output file",
+        help=(
+            "Path to Palo Alto "
+            "`show routing protocol bgp loc-rib` output."
+        ),
     )
+
     parser.add_argument(
-        "--inventory",
+        "--summary",
         type=Path,
-        help="Path to an Excel network inventory",
+        help=(
+            "Optional path to Palo Alto "
+            "`show routing protocol bgp summary` output."
+        ),
     )
+
     parser.add_argument(
-        "--show-prefixes",
+        "--local-asn",
+        type=int,
+        help=(
+            "Explicit local ASN. "
+            "Overrides the ASN parsed from --summary."
+        ),
+    )
+
+    parser.add_argument(
+        "--virtual-router",
+        help=(
+            "Virtual-router name to process when the RIB "
+            "contains multiple sections."
+        ),
+    )
+
+    parser.add_argument(
+        "--encoding",
+        default="utf-8-sig",
+        help=(
+            "Input text encoding "
+            "(default: utf-8-sig)."
+        ),
+    )
+
+    parser.add_argument(
+        "--show-local-routes",
         action="store_true",
-        help="Log every prefix grouped under its origin ASN",
+        help=(
+            "Log local BGP routes and their resulting "
+            "AsPrefix records."
+        ),
     )
+
+    parser.add_argument(
+        "--show-autonomous-systems",
+        action="store_true",
+        help=(
+            "Log generated AutonomousSystem objects "
+            "at DEBUG level."
+        ),
+    )
+
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Log individual inventory IP-to-site mappings",
+        help="Enable debug logging.",
     )
+
     args = parser.parse_args()
 
-    level = "DEBUG" if args.debug else "INFO"
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S_%f"
+    )
+
+    level = (
+        "DEBUG"
+        if args.debug
+        else "INFO"
+    )
+
+    log_path = Path(
+        f"logs/check_bgp_rib_{timestamp}.log"
+    )
+
+    log_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     setup_logging(
         LoggingSettings(
-            targets_json=json.dumps([
-                {
-                    "name": "console",
-                    "output": "stdout",
-                    "level": level,
-                    "format": "text",
-                },
-                {
-                    "name": "file",
-                    "output": "file",
-                    "level": level,
-                    "format": "text",
-                    "file_path": "logs/check_bgp_rib.log",
-                },
-            ])
+            targets_json=json.dumps(
+                [
+                    {
+                        "name": "console",
+                        "output": "stdout",
+                        "level": level,
+                        "format": "text",
+                    },
+                    {
+                        "name": "file",
+                        "output": "file",
+                        "level": level,
+                        "format": "text",
+                        "file_path": str(
+                            log_path
+                        ),
+                    },
+                ]
+            )
         )
     )
 
-    inventory = (
-        read_network_devices(args.inventory)
-        if args.inventory is not None
-        else None
+    logger.info(
+        "BGP RIB source",
+        extra={
+            "source": str(
+                args.rib.resolve()
+            )
+        },
     )
-    if inventory is not None:
-        _log_inventory(inventory)
 
-    dump = parse_loc_rib(args.file.read_text(encoding="utf-8"))
+    try:
+        rib_text = args.rib.read_text(
+            encoding=args.encoding
+        )
+    except (
+        OSError,
+        UnicodeError,
+        LookupError,
+    ) as exc:
+        parser.error(
+            f"Cannot read BGP RIB file: {exc}"
+        )
+
+    try:
+        rib_dump = parse_loc_rib(
+            rib_text
+        )
+    except ValueError as exc:
+        parser.error(
+            str(exc)
+        )
 
     logger.info(
         "BGP RIB sections found",
-        extra={"section_count": len(dump.routers)},
+        extra={
+            "section_count": len(
+                rib_dump.routers
+            )
+        },
     )
 
-    for number, router in enumerate(dump.routers, start=1):
-        _log_router(number, router, inventory, args.show_prefixes)
+    try:
+        router = _select_router(
+            rib_dump.routers,
+            args.virtual_router,
+        )
+    except ValueError as exc:
+        parser.error(
+            str(exc)
+        )
 
     logger.info(
-        "BGP RIB check completed",
+        "BGP router section selected",
         extra={
-            "section_count": len(dump.routers),
-            "total_parsed_routes": sum(
-                len(router.routes) for router in dump.routers
+            "virtual_router": (
+                router.virtual_router
+            ),
+            "virtual_router_id": (
+                router.virtual_router_id
+            ),
+            "parsed_routes": len(
+                router.routes
+            ),
+            "reported_routes": (
+                router.total_routes_shown
+            ),
+            "unparsed_lines": len(
+                router.unparsed_lines
             ),
         },
     )
-    _log_unparsed("Outside router sections", dump.unparsed_lines)
-    
+
+    try:
+        local_asn, local_asn_source = (
+            _resolve_local_asn(
+                manual_local_asn=(
+                    args.local_asn
+                ),
+                summary_path=args.summary,
+                encoding=args.encoding,
+                virtual_router=(
+                    router.virtual_router
+                ),
+            )
+        )
+    except ValueError as exc:
+        parser.error(
+            str(exc)
+        )
+
+    logger.info(
+        "Local ASN resolved",
+        extra={
+            "local_asn": local_asn,
+            "source": local_asn_source,
+        },
+    )
+
+    evidence_store = EvidenceStore()
+
+    result = process_bgp_routes(
+        router.routes,
+        source=str(
+            args.rib.resolve()
+        ),
+        evidence_store=evidence_store,
+        local_asn=local_asn,
+        context={
+            "virtual_router": (
+                router.virtual_router
+            ),
+            "virtual_router_id": (
+                router.virtual_router_id
+            ),
+        },
+    )
+
+    unique_as_prefix_networks = {
+        as_prefix.prefix
+        for as_prefix in result.as_prefixes
+    }
+
+    autonomous_system_asns = {
+        autonomous_system.asn
+        for autonomous_system
+        in result.autonomous_systems
+    }
+
+    logger.info(
+        "BGP processing result",
+        extra={
+            "parsed_routes": len(
+                router.routes
+            ),
+            "as_prefix_observations": len(
+                result.as_prefixes
+            ),
+            "unique_as_prefix_networks": len(
+                unique_as_prefix_networks
+            ),
+            "autonomous_systems": len(
+                result.autonomous_systems
+            ),
+            "local_routes": (
+                result.local_route_count
+            ),
+            "unknown_origins": (
+                result.unknown_origin_count
+            ),
+            "local_asn": local_asn,
+            "local_asn_present_in_output": (
+                local_asn
+                in autonomous_system_asns
+                if local_asn is not None
+                else False
+            ),
+        },
+    )
+
+    logger.info(
+        "Evidence result",
+        extra={
+            "records": len(
+                evidence_store.records
+            ),
+            "relations": len(
+                evidence_store.relations
+            ),
+        },
+    )
+
+    if args.show_local_routes:
+        _log_local_as_prefixes(
+            result
+        )
+
+    if args.show_autonomous_systems:
+        _log_autonomous_systems(
+            result
+        )
+
+    if (
+        local_asn is not None
+        and result.unknown_origin_count == 0
+        and len(result.as_prefixes)
+        == len(router.routes)
+    ):
+        logger.info(
+            "BGP processing validation PASSED",
+            extra={
+                "routes": len(
+                    router.routes
+                ),
+                "as_prefixes": len(
+                    result.as_prefixes
+                ),
+            },
+        )
+
+    else:
+        logger.warning(
+            "BGP processing validation requires review",
+            extra={
+                "routes": len(
+                    router.routes
+                ),
+                "as_prefixes": len(
+                    result.as_prefixes
+                ),
+                "unknown_origins": (
+                    result.unknown_origin_count
+                ),
+                "local_asn": local_asn,
+            },
+        )
+
+    network_prefix_store = NetworkPrefixStore()
+
+    network_prefixes = process_network_prefixes(
+        result.as_prefixes,
+        network_prefix_store=network_prefix_store,
+        evidence_store=evidence_store,
+    )
+
+    logger.info(
+        "IPAM prefix processing result",
+        extra={
+            "as_prefix_observations": len(
+                result.as_prefixes
+            ),
+            "network_prefixes": len(
+                network_prefixes
+            ),
+            "network_prefix_store": len(
+                network_prefix_store
+            ),
+            "evidence_records": len(
+                evidence_store.records
+            ),
+            "evidence_relations": len(
+                evidence_store.relations
+            ),
+        },
+    )
+
+    logger.info(
+        "Log file",
+        extra={
+            "path": str(
+                log_path.resolve()
+            )
+        },
+    )
 
 
 if __name__ == "__main__":
