@@ -7,30 +7,39 @@ types; they do not perform runtime conversion or validation.
 
 from dataclasses import dataclass, field
 from ipaddress import IPv4Network
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
+
+NETWORK_PREFIX_NAMESPACE = UUID(
+    "b9a7da8a-5b4f-4f05-8a71-163056b8d682"
+)
+
 
 
 @dataclass(frozen=True, slots=True)
 class NetworkPrefix:
     """A canonical IPv4 network prefix independent of its observation source.
 
-    The prefix represents an IPv4 network that may be discovered through
-    BGP, firewall configurations, or other inventory sources.
+    Identity is deterministically generated from the normalized IPv4 prefix.
 
-    The model does not establish site ownership, routing context, or ASN
-    association. These relationships are managed by other components.
-
-    Equality and hashing are based on the object's UUID. Identical networks
-    can therefore remain distinct objects in different routing contexts.
+    Site ownership, routing context, and ASN associations are managed
+    separately.
     """
 
-    id: UUID = field(
-        default_factory=uuid4,
-        kw_only=True,
-    )
-    prefix: IPv4Network = field(
-        compare=False
-    )
+    prefix: IPv4Network = field(compare=False)
+
+    id: UUID = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "id",
+            uuid5(
+                NETWORK_PREFIX_NAMESPACE,
+                f"network-prefix:{self.prefix.with_prefixlen}",
+            ),
+        )
+
+
 
 
 @dataclass(frozen=True, slots=True)
