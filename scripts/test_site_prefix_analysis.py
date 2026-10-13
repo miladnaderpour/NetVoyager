@@ -5,6 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from ipaddress import IPv4Network
 
 from netvoyager_analysis.bgp.processing import process_bgp_routes
 from netvoyager_analysis.devices.processing import process_device_observations
@@ -36,6 +37,9 @@ logger = get_logger(
 
 TARGET_VIRTUAL_ROUTER = "vpn_intern"
 DEFAULT_MIN_PREFIX_LENGTH = 16
+EXCLUDED_SITE_NETWORKS = (
+    IPv4Network("10.127.24.0/24"),
+)
 
 
 def _select_router(
@@ -448,6 +452,7 @@ def main() -> None:
         finding_store=finding_store,
         network_prefix_store=network_prefix_store,
         min_prefix_length=args.min_prefix_length,
+        excluded_networks=EXCLUDED_SITE_NETWORKS,
     )
 
     #

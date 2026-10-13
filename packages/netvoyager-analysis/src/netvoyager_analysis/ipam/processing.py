@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from ipaddress import IPv4Network
 from uuid import UUID
 
 from netvoyager_core.logging import get_logger
@@ -35,17 +36,16 @@ def process_network_prefixes(
     network_prefix_store: NetworkPrefixStore,
     evidence_store: EvidenceStore,
 ) -> tuple[NetworkPrefix, ...]:
-    """Create canonical NetworkPrefix objects from BGP prefix observations.
+    """Create canonical NetworkPrefix objects from BGP observations.
 
-    Create or reuse one canonical NetworkPrefix for every exact IPv4 network
-    observed through AsPrefix records.
+    Create or reuse one canonical NetworkPrefix for every exact IPv4
+    network observed through AsPrefix records.
 
     Existing evidence linked to each AsPrefix is also linked to the
     corresponding canonical NetworkPrefix.
 
-    Preserve the first encounter order of unique IPv4 networks. Repeated
-    AsPrefix observations for the same exact network reuse the same
-    NetworkPrefix object.
+    Preserve the first encounter order of unique IPv4 networks.
+    Repeated AsPrefix observations reuse the same NetworkPrefix object.
 
     The supplied AsPrefix objects and evidence records are not modified.
     """
@@ -78,11 +78,9 @@ def process_network_prefixes(
         else:
             reused_count += 1
 
-        evidence_records = (
-            evidence_store.for_object(
-                "as_prefix",
-                as_prefix.id,
-            )
+        evidence_records = evidence_store.for_object(
+            "as_prefix",
+            as_prefix.id,
         )
 
         for evidence in evidence_records:
@@ -97,20 +95,12 @@ def process_network_prefixes(
         logger.debug(
             "Network prefix processed",
             extra={
-                "prefix": str(
-                    as_prefix.prefix
-                ),
+                "prefix": str(as_prefix.prefix),
                 "asn": as_prefix.asn,
-                "as_prefix_id": str(
-                    as_prefix.id
-                ),
-                "network_prefix_id": str(
-                    network_prefix.id
-                ),
+                "as_prefix_id": str(as_prefix.id),
+                "network_prefix_id": str(network_prefix.id),
                 "network_prefix_created": created,
-                "evidence_count": len(
-                    evidence_records
-                ),
+                "evidence_count": len(evidence_records),
             },
         )
 
@@ -121,18 +111,12 @@ def process_network_prefixes(
     logger.info(
         "Network prefix processing completed",
         extra={
-            "as_prefix_observations": (
-                observation_count
-            ),
-            "network_prefixes": len(
-                result
-            ),
+            "as_prefix_observations": observation_count,
+            "network_prefixes": len(result),
             "created_prefixes": created_count,
             "reused_observations": reused_count,
             "evidence_links": evidence_link_count,
-            "store_size": len(
-                network_prefix_store
-            ),
+            "store_size": len(network_prefix_store),
         },
     )
 
@@ -146,37 +130,82 @@ def analyze_site_prefixes(
     finding_store: FindingStore,
     network_prefix_store: NetworkPrefixStore,
     min_prefix_length: int | None = 16,
+    excluded_networks: Iterable[IPv4Network] = (),
 ) -> SitePrefixAnalysisResult:
-    """Associate device management addresses with canonical network prefixes.
+    """Associate device management addresses with canonical prefixes.
 
     For every device with a management IP and site assignment:
 
-    - Find the most-specific canonical NetworkPrefix containing the address.
+    - Find the most-specific eligible NetworkPrefix containing the IP.
     - Reject matches broader than the configured minimum prefix length.
-    - Associate the matched NetworkPrefix UUID with the device's site scope.
+    - Associate the matched NetworkPrefix UUID with the site's scope.
     - Group devices by site and canonical NetworkPrefix.
-    - Record findings for missing data, unmatched addresses, broad matches,
-      missing site scopes, and prefixes associated with multiple sites.
+    - Generate findings for missing information, unmatched addresses,
+      broad matches, missing scopes, and prefixes shared by sites.
 
-    This function does not create NetworkPrefix objects, inspect AsPrefix
-    observations, copy evidence, or infer autonomous-system relationships.
+    Prefixes contained within an excluded network are not considered
+    candidates for site-prefix matching.
 
-    The supplied NetworkScope objects may be modified by adding canonical
-    NetworkPrefix UUID associations. NetworkDevice and NetworkPrefix objects
-    are not modified.
+    Exclusions affect only this analysis. Canonical NetworkPrefix
+    objects, BGP observations, and evidence remain unchanged.
+
+    This function does not create NetworkPrefix objects, inspect
+    AsPrefix observations, copy evidence, or infer ASN relationships.
+
+    NetworkScope objects may be modified by adding canonical prefix
+    UUID associations. NetworkDevice and NetworkPrefix objects are
+    not modified.
     """
-    device_list = list(
-        devices
-    )
+    device_list = list(devices)
 
-    network_prefixes = (
+    #
+    # Prepare canonical prefixes and exclusions.
+    #
+    network_prefixes = tuple(
         network_prefix_store.values()
     )
 
-    prefix_index = build_prefix_index(
-        network_prefixes
+    excluded_ranges = tuple(
+        excluded_networks
     )
 
+    eligible_prefixes = tuple(
+        network_prefix
+        for network_prefix in network_prefixes
+        if not any(
+            network_prefix.prefix.subnet_of(excluded)
+            for excluded in excluded_ranges
+        )
+    )
+
+    excluded_prefix_count = (
+        len(network_prefixes) - len(eligible_prefixes)
+    )
+
+    #
+    # Build the matching index using eligible prefixes only.
+    #
+    prefix_index = build_prefix_index(
+        eligible_prefixes
+    )
+
+    logger.info(
+        "Site prefix matching index prepared",
+        extra={
+            "canonical_prefixes": len(network_prefixes),
+            "eligible_prefixes": len(eligible_prefixes),
+            "excluded_prefixes": excluded_prefix_count,
+            "excluded_networks": tuple(
+                str(network)
+                for network in excluded_ranges
+            ),
+            "min_prefix_length": min_prefix_length,
+        },
+    )
+
+    #
+    # Prepare association collections.
+    #
     association_devices: dict[
         tuple[str, UUID],
         dict[object, NetworkDevice],
@@ -197,11 +226,14 @@ def analyze_site_prefixes(
         NetworkPrefix,
     ] = {
         prefix.id: prefix
-        for prefix in network_prefixes
+        for prefix in eligible_prefixes
     }
 
     matched_device_ids: set[object] = set()
 
+    #
+    # Match devices to canonical network prefixes.
+    #
     for device in device_list:
         if device.management_ip is None:
             finding_store.add(
@@ -235,9 +267,7 @@ def analyze_site_prefixes(
                     object_id=device.device_id,
                     details={
                         "device_name": device.name,
-                        "management_ip": (
-                            device.management_ip
-                        ),
+                        "management_ip": device.management_ip,
                     },
                 )
             )
@@ -261,23 +291,20 @@ def analyze_site_prefixes(
                     details={
                         "device_name": device.name,
                         "site": device.site,
-                        "management_ip": (
-                            device.management_ip
-                        ),
+                        "management_ip": device.management_ip,
                     },
                 )
             )
             continue
 
-        match_result = (
-            find_most_specific_match_indexed(
-                device.management_ip,
-                prefix_index,
-                min_prefix_length=(
-                    min_prefix_length
-                ),
-                skip_broad_matches=True,
-            )
+        #
+        # Find the most-specific eligible prefix.
+        #
+        match_result = find_most_specific_match_indexed(
+            device.management_ip,
+            prefix_index,
+            min_prefix_length=min_prefix_length,
+            skip_broad_matches=True,
         )
 
         if match_result.is_broader_than_expected:
@@ -295,15 +322,11 @@ def analyze_site_prefixes(
                     details={
                         "device_name": device.name,
                         "site": device.site,
-                        "management_ip": (
-                            device.management_ip
-                        ),
+                        "management_ip": device.management_ip,
                         "matched_prefix_length": (
                             match_result.matched_prefix_length
                         ),
-                        "min_prefix_length": (
-                            min_prefix_length
-                        ),
+                        "min_prefix_length": min_prefix_length,
                     },
                 )
             )
@@ -319,21 +342,22 @@ def analyze_site_prefixes(
                     message=(
                         f"Device {device.name} management IP "
                         f"{device.management_ip} does not match "
-                        "any canonical network prefix"
+                        "any eligible canonical network prefix"
                     ),
                     object_type="network_device",
                     object_id=device.device_id,
                     details={
                         "device_name": device.name,
                         "site": device.site,
-                        "management_ip": (
-                            device.management_ip
-                        ),
+                        "management_ip": device.management_ip,
                     },
                 )
             )
             continue
 
+        #
+        # Record the successful device-prefix association.
+        #
         matched_device_ids.add(
             device.device_id
         )
@@ -364,20 +388,19 @@ def analyze_site_prefixes(
                 network_prefix.id
             )
 
+    #
+    # Build site-prefix association results.
+    #
     associations: list[
         SitePrefixAssociation
     ] = []
 
-    for key, devices_by_id in (
-        association_devices.items()
-    ):
+    for key, devices_by_id in association_devices.items():
         site, _ = key
 
-        network_prefix = (
-            association_prefixes[
-                key
-            ]
-        )
+        network_prefix = association_prefixes[
+            key
+        ]
 
         associations.append(
             SitePrefixAssociation(
@@ -389,6 +412,9 @@ def analyze_site_prefixes(
             )
         )
 
+    #
+    # Detect canonical prefixes associated with multiple sites.
+    #
     for prefix_id, sites in prefix_sites.items():
         if len(sites) <= 1:
             continue
@@ -408,33 +434,25 @@ def analyze_site_prefixes(
                 object_type="network_prefix",
                 object_id=network_prefix.id,
                 details={
-                    "prefix": (
-                        network_prefix.prefix
-                    ),
+                    "prefix": network_prefix.prefix,
                     "sites": tuple(
-                        sorted(
-                            sites
-                        )
+                        sorted(sites)
                     ),
                 },
             )
         )
 
+    #
+    # Log site-prefix analysis results.
+    #
     logger.info(
         "Site prefix analysis completed",
         extra={
-            "device_count": len(
-                device_list
-            ),
-            "matched_device_count": len(
-                matched_device_ids
-            ),
-            "association_count": len(
-                associations
-            ),
-            "associated_prefix_count": len(
-                prefix_sites
-            ),
+            "device_count": len(device_list),
+            "matched_device_count": len(matched_device_ids),
+            "association_count": len(associations),
+            "associated_prefix_count": len(prefix_sites),
+            "excluded_prefix_count": excluded_prefix_count,
         },
     )
 

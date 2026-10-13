@@ -6,47 +6,57 @@ constructing these models. Type annotations describe the expected Python
 types; they do not perform runtime conversion or validation.
 """
 
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4,uuid5
 from dataclasses import dataclass, field
+from typing import Literal
 from ipaddress import IPv4Network, IPv4Address
 
 from netvoyager_network.bgp.exceptions import DuplicatePrefixError
 
+AS_PREFIX_NAMESPACE = UUID("a3e41b7d-29f0-4b6c-8d15-7f0e2a96c531")
+
+AUTONOMOUS_SYSTEM_NAMESPACE = UUID(
+    "e72a1354-813e-4d68-bd28-e7f0ab655b20"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AsPrefix:
-    """An observed IPv4 prefix associated with an origin ASN.
+    """An IPv4 BGP prefix observation reported by a network device.
 
-    The ASN identifies the attributed origin of the prefix. The optional
-    AS path preserves the sequence provided by the observation source:
-    - None means the path was unavailable or not collected.
-    - An empty tuple means an empty path was observed.
-    - A populated tuple contains the observed ASN sequence.
+    Identity is derived from the reporting device UUID, normalized
+    prefix, and attributed origin ASN.
 
-    Repeated ASNs are preserved because they may represent AS prepending.
-    The model does not derive or verify the origin ASN from the path.
+    AS path and BGP ORIGIN are observation attributes and do not
+    participate in identity generation.
 
-    Equality compares ASN, prefix, and AS path, excluding the ID.
-    Identical observations can therefore compare equal while retaining
-    separate IDs.
+    Identical identity fields produce the same UUID across runs.
     """
 
-    id: UUID = field(
-        default_factory=uuid4,
-        kw_only=True,
-        compare=False,
-    )
+    source_id: UUID
     asn: int
     prefix: IPv4Network
     as_path: tuple[int, ...] | None = None
+    origin: Literal["igp", "egp", "incomplete"] | None = None
+
+    id: UUID = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "id",
+            uuid5(
+                AS_PREFIX_NAMESPACE,
+                f"as-prefix:{self.source_id}:"
+                f"{self.prefix.with_prefixlen}:{self.asn}",
+            ),
+        )
 
     def contains(self, address: IPv4Address) -> bool:
-        """Return whether the IPv4 address belongs to this prefix.
-
-        This checks membership in this individual network. It does not compare
-        other prefixes or determine whether this is the most specific match.
-        """
+        """Return whether the IPv4 address belongs to this prefix."""
         return address in self.prefix
+
+
 
 
 @dataclass(slots=True)
@@ -70,16 +80,27 @@ class AutonomousSystem:
     """
 
     id: UUID = field(
-        default_factory=uuid4,
-        kw_only=True,
-        compare=False,
+    init=False,
+    compare=False,
     )
+
     asn: int
     _prefixes: set[IPv4Network] = field(
         default_factory=set,
         init=False,
         repr=False,
     )
+
+    def __post_init__(self) -> None:
+        """Generate deterministic identity from the autonomous system number."""
+        object.__setattr__(
+            self,
+            "id",
+            uuid5(
+                AUTONOMOUS_SYSTEM_NAMESPACE,
+                f"autonomous-system:{self.asn}",
+            ),
+        )
 
     def add_prefix(self, prefix: IPv4Network) -> None:
         """Associate an IPv4 prefix with this autonomous system.

@@ -89,26 +89,15 @@ def _create_route_evidence(
 
 
 def _link_autonomous_system_evidence(
-    as_prefixes: Iterable[AsPrefix],
+    observed_evidence: Iterable[tuple[AsPrefix, UUID]],
     *,
-    evidence_ids_by_prefix_id: Mapping[UUID, UUID],
     autonomous_systems: Mapping[int, AutonomousSystem],
     evidence_store: EvidenceStore,
 ) -> None:
-    """Link route evidence to derived AutonomousSystem objects.
+    """Link each BGP observation's evidence to its AutonomousSystem."""
 
-    Each AsPrefix created during BGP processing has one corresponding
-    EvidenceRecord. Reuse that known relationship directly when linking
-    evidence to the AutonomousSystem derived from the AsPrefix ASN.
-    """
-    for as_prefix in as_prefixes:
-        autonomous_system = autonomous_systems[
-            as_prefix.asn
-        ]
-
-        evidence_id = evidence_ids_by_prefix_id[
-            as_prefix.id
-        ]
+    for as_prefix, evidence_id in observed_evidence:
+        autonomous_system = autonomous_systems[as_prefix.asn]
 
         evidence_store.link(
             evidence_id,
@@ -121,6 +110,7 @@ def process_bgp_routes(
     routes: Iterable[BgpRouteObservation],
     *,
     source: str,
+    source_id: UUID,
     evidence_store: EvidenceStore,
     local_asn: int | None = None,
     context: Mapping[str, object] | None = None,
@@ -143,10 +133,7 @@ def process_bgp_routes(
     """
     as_prefixes: list[AsPrefix] = []
 
-    evidence_ids_by_prefix_id: dict[
-        UUID,
-        UUID,
-    ] = {}
+    observed_evidence: list[tuple[AsPrefix, UUID]] = []
 
     local_route_count = 0
     unknown_origin_count = 0
@@ -171,6 +158,7 @@ def process_bgp_routes(
 
         if origin_asn is not None:
             as_prefix = AsPrefix(
+                source_id=source_id,
                 asn=origin_asn,
                 prefix=route.prefix,
                 as_path=route.as_path,
@@ -202,9 +190,9 @@ def process_bgp_routes(
                 as_prefix.id,
             )
 
-            evidence_ids_by_prefix_id[
-                as_prefix.id
-            ] = evidence.id
+            observed_evidence.append(
+                (as_prefix, evidence.id)
+            )
 
         logger.debug(
             "BGP route processed",
@@ -228,13 +216,8 @@ def process_bgp_routes(
     )
 
     _link_autonomous_system_evidence(
-        as_prefixes,
-        evidence_ids_by_prefix_id=(
-            evidence_ids_by_prefix_id
-        ),
-        autonomous_systems=(
-            grouping_result.autonomous_systems
-        ),
+        observed_evidence,
+        autonomous_systems=grouping_result.autonomous_systems,
         evidence_store=evidence_store,
     )
 
