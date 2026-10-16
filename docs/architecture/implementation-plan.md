@@ -38,3 +38,18 @@
 | More specific `/23` validated for Site A | Site A gets accepted `/23`; shared parent candidate need not be deleted |
 | Partial Panorama collection omits a route | No confirmed removal inferred from incomplete data |
 | DHCP server hosts remote scopes | DHCP scope prefixes discovered; no automatic local-site assignment |
+
+## Device discovery and inventory evidence workstream (2026-10-16)
+
+Keep the earlier IPAM implementation order above as a separate outstanding workstream. The following items are **planned or require verification**, not implicitly complete:
+
+1. Inspect current checked-in `netvoyager-analysis/devices/{processing,matching,enrichment}` and `devices/discovery/{models,relationships,store,evidence}`; compare with proposed session code before assuming integration.
+2. Verify baseline Excel import: one device per nonempty resolved name; missing name warning and evidence-only outcome; all source rows and duplicate issues preserved.
+3. Implement/import run provenance (file, worksheet, row, run identity) and distinguish repeated evidence observations from device technical-state changes (ADR-0010).
+4. Harden discovery registry against uncontrolled candidate/relationship mutation; centralize lifecycle and relationship transition validation.
+5. Implement append-only, evidence-backed candidate resolution reversal; check canonical device existence, preserve multiple candidates per device and keep decision history.
+6. Define source-specific strong physical identity rules; ensure stack-level reports cannot masquerade as single-member identity.
+7. Decide canonical name generation for devices not present in Excel; preserve existing `NetworkDevice` UUIDv5 contract and avoid name collisions.
+8. Build reconciliation/promotion service, then integrate with `netvoyager-discovery` and vendor APIs/CLI collectors.
+9. Validate complete evidence lookup, including candidates resolved to a device and relationship/decision evidence as separately scoped.
+10. Run focused and cross-package regressions and compare known inventory/BGP/Panorama baselines; no passing integrated results have been established by this documentation pass.
