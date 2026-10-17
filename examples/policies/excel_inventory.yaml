@@ -1,0 +1,72 @@
+
+source_id: excel_inventory
+method: device_inventory
+description: Excel baseline inventory of physical network devices
+version: 1
+
+claims:
+  - claim: device.physical_identity
+    authority: supporting
+    actions:
+      record_observation: {}
+      create_candidate: {}
+      correlate_candidate: {}
+
+  - claim: device.name
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.host_name
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.serial_number
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.management_ip
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.manufacturer
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.model
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: device.software_version
+    authority: supporting
+    actions:
+      record_observation: {}
+      propose_attribute: {}
+
+  - claim: scope.existence
+    authority: supporting
+    actions:
+      record_observation: {}
+      create_candidate: {}
+
+  - claim: relationship.device_site
+    authority: supporting
+    actions:
+      record_observation: {}
+      create_candidate_relationship: {}
+
+  - claim: relationship.prefix_site
+    authority: supporting
+    actions:
+      create_candidate_relationship: {}

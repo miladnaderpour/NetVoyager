@@ -1,3 +1,8 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "yaml.schemas": {
+    "./schemas/netvoyager-source-policy.schema.json": [
+      "examples/policies/*.yaml"
+    ]
+  }
 }

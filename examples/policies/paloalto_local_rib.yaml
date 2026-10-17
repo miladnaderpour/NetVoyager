@@ -1,0 +1,21 @@
+
+source_id: paloalto
+method: local_rib
+description: Palo Alto BGP local routing information base
+version: 1
+
+claims:
+  - claim: prefix.existence
+    authority: trusted
+    actions:
+      record_observation: {}
+      create_canonical_prefix:
+        requirements:
+          - valid_network_prefix
+          - verified_reporting_source
+
+  - claim: relationship.prefix_site
+    authority: supporting
+    actions:
+      record_observation: {}
+      create_candidate_relationship: {}
