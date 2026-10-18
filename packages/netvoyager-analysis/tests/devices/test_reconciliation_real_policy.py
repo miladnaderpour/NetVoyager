@@ -10,7 +10,7 @@ import pytest
 from netvoyager_network.device.models import NetworkDevice
 from netvoyager_analysis.devices.candidate_matching import IdentityTarget
 from netvoyager_analysis.devices.discovery.models import DeviceDiscoveryCandidate
-from netvoyager_analysis.devices.discovery.store import DeviceDiscoveryStore
+from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
 from netvoyager_analysis.devices.matching_rules import SourceRef
 from netvoyager_analysis.devices.reconciliation import DeviceReconciliationService
 from netvoyager_analysis.policies.engine import PolicyEngine

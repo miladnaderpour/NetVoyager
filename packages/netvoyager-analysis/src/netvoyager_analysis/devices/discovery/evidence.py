@@ -12,7 +12,7 @@ from uuid import UUID
 
 from ...evidence.models import EvidenceRecord
 from ...evidence.store import EvidenceStore
-from .store import DeviceDiscoveryStore
+from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
 
 
 def evidence_for_device(

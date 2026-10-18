@@ -17,7 +17,7 @@ from netvoyager_analysis.devices.attribute_reconciliation import (
 )
 from netvoyager_analysis.devices.candidate_matching import IdentityTarget
 from netvoyager_analysis.devices.discovery.models import DeviceDiscoveryCandidate
-from netvoyager_analysis.devices.discovery.store import DeviceDiscoveryStore
+from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
 from netvoyager_analysis.devices.identity_validation import IdentityValidator
 from netvoyager_analysis.devices.matching_rules import SourceRef
 from netvoyager_analysis.devices.reconciliation import DeviceReconciliationService

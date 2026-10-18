@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ..policies.engine import PolicyEngine
 from .candidate_matching import IdentityTarget, compare_identity_targets
 from .matching_rules import SourceRef
-from .discovery.store import DeviceDiscoveryStore
+from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
 from .identity_validation import IdentityValidator
 
 @dataclass(frozen=True, slots=True)

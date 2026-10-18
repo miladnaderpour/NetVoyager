@@ -10,7 +10,7 @@ from netvoyager_analysis.devices.discovery.models import DeviceDiscoveryCandidat
 from netvoyager_analysis.devices.discovery.relationships import (
     DeviceDiscoveryCandidateRelationship,
 )
-from netvoyager_analysis.devices.discovery.store import DeviceDiscoveryStore
+from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
 
 
 def registered(store: DeviceDiscoveryStore) -> DeviceDiscoveryCandidate:

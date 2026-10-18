@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "netvoyager-core>=0.1.0",
     "netvoyager-network>=0.1.0",
+    "netvoyager-intelligence>=0.1.0",
     "PyYAML>=6.0,<7",
 ]
 
