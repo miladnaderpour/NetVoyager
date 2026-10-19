@@ -1,11 +1,10 @@
-"""Evidence models and builders for network analysis."""
 
-from .models import EvidenceRecord, EvidenceRelation
-from .store import EvidenceStore
+"""Evidence provenance models and public interfaces."""
 
+from .record import EvidenceRecord
+from .relation import EvidenceRelation
 
 __all__ = [
     "EvidenceRecord",
     "EvidenceRelation",
-    "EvidenceStore",
 ]

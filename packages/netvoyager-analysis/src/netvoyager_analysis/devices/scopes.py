@@ -49,7 +49,6 @@ def build_site_scopes(
 
         if scope is None:
             scope = NetworkScope(
-                scope_id=device.site,
                 name=device.site,
                 kind="site",
             )

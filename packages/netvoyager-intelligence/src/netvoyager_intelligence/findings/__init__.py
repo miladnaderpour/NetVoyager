@@ -1,6 +1,6 @@
 """Finding records and stores."""
 
-from .models import Finding, FindingSeverity
-from .store import FindingStore
+from .finding import Finding, FindingSeverity
 
-__all__ = ["Finding", "FindingSeverity", "FindingStore"]
+
+__all__ = ["Finding", "FindingSeverity"]

@@ -1,4 +1,4 @@
-# netwoyager-network/netvoyager_network/scope/exceptions.py
+
 """Scope-specific exceptions using the shared NetVoyager error structure."""
 
 from uuid import UUID
@@ -13,16 +13,16 @@ class DuplicateScopeAsnError(NetVoyagerError):
     be associated with other scopes, including parents or children.
     """
 
-    def __init__(self, *, scope_id: str, asn: int) -> None:
+    def __init__(self, *, scope_id: UUID, asn: int) -> None:
         """Describe the duplicate association using structured context."""
         self.scope_id = scope_id
         self.asn = asn
 
         super().__init__(
             code="scope.duplicate_asn",
-            message=f"AS {asn} is already associated with scope {scope_id!r}.",
+            message=f"AS {asn} is already associated with scope {scope_id}.",
             details={
-                "scope_id": scope_id,
+                "scope_id": str(scope_id),
                 "asn": asn,
             },
         )
@@ -40,7 +40,7 @@ class DuplicateScopePrefixError(NetVoyagerError):
     def __init__(
         self,
         *,
-        scope_id: str,
+        scope_id: UUID,
         prefix_id: UUID,
     ) -> None:
         """Describe the duplicate association using structured context."""
@@ -51,13 +51,14 @@ class DuplicateScopePrefixError(NetVoyagerError):
             code="scope.duplicate_prefix",
             message=(
                 f"Prefix {prefix_id} is already associated "
-                f"with scope {scope_id!r}."
+                f"with scope {scope_id}."
             ),
             details={
-                "scope_id": scope_id,
+                "scope_id": str(scope_id),
                 "prefix_id": str(prefix_id),
             },
         )
+
 
 class DuplicateScopeDeviceError(NetVoyagerError):
     """Raised when a device ID is already directly associated with a scope.
@@ -69,7 +70,7 @@ class DuplicateScopeDeviceError(NetVoyagerError):
     The same device may be associated with other scopes.
     """
 
-    def __init__(self, *, scope_id: str, device_id: UUID) -> None:
+    def __init__(self, *, scope_id: UUID, device_id: UUID) -> None:
         """Describe the duplicate association using JSON-compatible details."""
         self.scope_id = scope_id
         self.device_id = device_id
@@ -78,10 +79,10 @@ class DuplicateScopeDeviceError(NetVoyagerError):
             code="scope.duplicate_device",
             message=(
                 f"Device {device_id} is already associated "
-                f"with scope {scope_id!r}."
+                f"with scope {scope_id}."
             ),
             details={
-                "scope_id": scope_id,
+                "scope_id": str(scope_id),
                 "device_id": str(device_id),
             },
         )

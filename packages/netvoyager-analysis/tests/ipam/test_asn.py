@@ -21,7 +21,6 @@ def create_scope(
 ) -> NetworkScope:
     """Create a site scope with canonical prefix associations."""
     scope = NetworkScope(
-        scope_id=site,
         name=site,
         kind="site",
     )
@@ -359,7 +358,6 @@ def test_unknown_canonical_prefix_raises_error() -> None:
     finding_store = FindingStore()
 
     scope = NetworkScope(
-        scope_id="Site-A",
         name="Site-A",
         kind="site",
     )

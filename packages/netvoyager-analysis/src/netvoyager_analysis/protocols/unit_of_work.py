@@ -6,6 +6,8 @@ from typing import Protocol, Self
 
 from .devices import NetworkDeviceRepositoryProtocol
 from .discovery import DeviceDiscoveryRepositoryProtocol
+from .evidence import EvidenceRepositoryProtocol
+from .findings import FindingRepositoryProtocol
 
 
 class UnitOfWorkProtocol(Protocol):
@@ -29,6 +31,16 @@ class UnitOfWorkProtocol(Protocol):
     @property
     def discovery(self) -> DeviceDiscoveryRepositoryProtocol:
         """Return the device-discovery repository."""
+        ...
+
+    @property
+    def evidence(self) -> EvidenceRepositoryProtocol:
+        """Return the evidence provenance repository."""
+        ...
+
+    @property
+    def findings(self) -> FindingRepositoryProtocol:
+        """Return the analysis-finding repository."""
         ...
 
     def __enter__(self) -> Self:
