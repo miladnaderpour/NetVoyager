@@ -674,3 +674,28 @@ change persistence behavior.
 If those boundaries change, a separate superseding ADR must identify actual
 imports and package dependencies, the migration steps, rollback strategy, and
 required tests. Package extraction alone does not decide persistence strategy.
+
+## Addendum — Hybrid Intelligence Persistence (2026-10-19)
+
+ADR-0016 introduces SQLAlchemy-native intelligence models.
+
+The framework-independent domain-model requirement continues
+to apply to `netvoyager-network`.
+
+Evidence and findings owned by `netvoyager-intelligence`
+are an explicit exception to the original general model
+separation policy.
+
+These intelligence models do not require corresponding
+duplicate ORM entities in `netvoyager-database`.
+
+Database remains responsible for sessions, repositories,
+transactions, engines, and migrations.
+
+Analysis and Database remain independent of each other.
+
+All repository, Unit of Work, identity, transaction,
+and network-domain separation rules remain unchanged.
+
+ADR-0015 continues to supersede the retired Storage
+package provisions.

@@ -88,3 +88,27 @@ These decisions require separate examination of real source code, dependency cyc
 ## Implementation checkpoint
 
 An extraction patch named `netvoyager_intelligence_extraction_patch.zip` was prepared from an available NetVoyager repository snapshot. It adds the package, copies evidence and findings model/store implementations, introduces compatibility re-exports in analysis, adds an analysis package dependency, and includes two migration-focused tests. The archive is a proposed patch, **not evidence it has been applied to the user's local checkout**. The complete latest suite has not been rerun here. Previously reported database baseline: **46 passing tests**.
+
+## Addendum — Persistence Decision (2026-10-19)
+
+ADR-0016 resolves the previously deferred intelligence
+persistence representation.
+
+`netvoyager-intelligence` will use SQLAlchemy-native models
+for evidence, relations, and findings.
+
+The package may depend directly on SQLAlchemy but must not
+depend on `netvoyager-database`.
+
+`netvoyager-analysis` and `netvoyager-database` may both
+consume intelligence models while remaining independent
+of each other.
+
+Separate database entities and domain-to-ORM mapping are
+not required for these intelligence models.
+
+Database session, transaction, and repository ownership
+remains with `netvoyager-database`.
+
+The original intelligence package ownership and evidence
+provenance decisions remain unchanged.
