@@ -8,20 +8,32 @@ import pytest
 
 from netvoyager_analysis.attributes.models import AttributeAssertion
 from netvoyager_analysis.attributes.store import AttributeAssertionStore
-from netvoyager_analysis.evidence.models import EvidenceRecord
-from netvoyager_analysis.evidence.store import EvidenceStore
+from netvoyager_analysis.protocols.evidence import EvidenceRepositoryProtocol
+from netvoyager_database.engine import create_database_engine
+from netvoyager_database.repositories.evidence import SqlEvidenceRepository
+from netvoyager_database.schema import create_schema
+from netvoyager_database.session import create_session_factory
+from netvoyager_intelligence.evidence import EvidenceRecord
 from netvoyager_analysis.policies.models import PolicyEvaluationResult
 
 
 @pytest.fixture
-def evidence_store() -> EvidenceStore:
-    """Return an empty evidence store."""
-    return EvidenceStore()
+def evidence_store():
+    """Provide an isolated SQLite-backed evidence repository."""
+    engine = create_database_engine("sqlite:///:memory:")
+    create_schema(engine)
+    session_factory = create_session_factory(engine)
+
+    try:
+        with session_factory() as session:
+            yield SqlEvidenceRepository(session)
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
 def assertion_store(
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
 ) -> AttributeAssertionStore:
     """Return an assertion store linked to the evidence store."""
     return AttributeAssertionStore(
@@ -36,7 +48,7 @@ def device_id() -> UUID:
 
 
 def add_evidence(
-    store: EvidenceStore,
+    store: EvidenceRepositoryProtocol,
     *,
     source: str = "excel_inventory",
     value: str = "SW01",
@@ -115,7 +127,7 @@ def confirm_assertion(
 
 def test_register_proposed_assertion(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Register an assertion and link its original evidence."""
@@ -128,8 +140,8 @@ def test_register_proposed_assertion(
     assert assertion_store.assertions == (assertion,)
 
     assert evidence_store.for_object(
-        "attribute_assertion",
         assertion.assertion_id,
+        object_type="attribute_assertion",
     ) == (evidence,)
 
 
@@ -148,7 +160,7 @@ def test_reject_missing_evidence(
 
 def test_reject_duplicate_assertion_identity(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """An assertion UUID cannot be registered twice."""
@@ -163,7 +175,7 @@ def test_reject_duplicate_assertion_identity(
 
 def test_reject_duplicate_logical_claim(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """The same target, field, and value cannot be registered twice."""
@@ -185,7 +197,7 @@ def test_reject_duplicate_logical_claim(
 
 def test_distinct_values_can_coexist(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Conflicting observed values remain separate assertions."""
@@ -214,7 +226,7 @@ def test_distinct_values_can_coexist(
 
 def test_add_evidence_without_status_change(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Additional evidence does not automatically confirm an assertion."""
@@ -237,14 +249,14 @@ def test_add_evidence_without_status_change(
     assert assertion_store.decisions == ()
 
     assert evidence_store.for_object(
-        "attribute_assertion",
         assertion.assertion_id,
+        object_type="attribute_assertion",
     ) == (excel, panorama)
 
 
 def test_repeated_evidence_is_idempotent(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Linking the same evidence again must not duplicate it."""
@@ -264,7 +276,7 @@ def test_repeated_evidence_is_idempotent(
 
 def test_confirm_with_allowed_policy(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """An authorized confirmation updates status and records a decision."""
@@ -298,7 +310,7 @@ def test_confirm_with_allowed_policy(
 
 def test_confirmation_requires_authorization(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """A denied policy result cannot confirm an assertion."""
@@ -324,7 +336,7 @@ def test_confirmation_requires_authorization(
 
 def test_reject_mismatching_policy_claim(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """An authorization for another attribute cannot confirm this one."""
@@ -348,7 +360,7 @@ def test_reject_mismatching_policy_claim(
 
 def test_dispute_preserves_decision_history(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """A confirmed assertion can be disputed without losing its history."""
@@ -393,7 +405,7 @@ def test_dispute_preserves_decision_history(
 
 def test_dispute_requires_reason(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """A dispute cannot be recorded without an explanation."""
@@ -417,7 +429,7 @@ def test_dispute_requires_reason(
 
 def test_supersession_preserves_history(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Superseded assertions remain queryable with all decisions."""
@@ -457,7 +469,7 @@ def test_supersession_preserves_history(
 
 def test_returned_assertion_snapshots_are_immutable(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Older assertion snapshots remain unchanged after a transition."""
@@ -481,7 +493,7 @@ def test_returned_assertion_snapshots_are_immutable(
 
 def test_assertion_lookup_is_target_specific(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Different target identities retain independent assertions."""
@@ -513,7 +525,7 @@ def test_assertion_lookup_is_target_specific(
 
 def test_find_value_preserves_value_types(
     assertion_store: AttributeAssertionStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     device_id: UUID,
 ) -> None:
     """Exact attribute lookup preserves the original value type."""
@@ -523,7 +535,7 @@ def test_find_value_preserves_value_types(
         target_type="network_device",
         target_id=device_id,
         field_name="management_ip",
-        value=IPv4Address("10.131.0.15"),
+        value=IPv4Address("192.0.2.15"),
         evidence_ids=(evidence.id,),
     )
 
@@ -533,12 +545,12 @@ def test_find_value_preserves_value_types(
         "network_device",
         device_id,
         "management_ip",
-        IPv4Address("10.131.0.15"),
+        IPv4Address("192.0.2.15"),
     ) == assertion
 
     assert assertion_store.find_value(
         "network_device",
         device_id,
         "management_ip",
-        "10.131.0.15",
+        "192.0.2.15",
     ) is None

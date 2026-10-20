@@ -34,7 +34,7 @@ def process_network_prefixes(
     as_prefixes: Iterable[AsPrefix],
     *,
     network_prefix_store: NetworkPrefixStore,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
 ) -> tuple[NetworkPrefix, ...]:
     """Create canonical NetworkPrefix objects from BGP observations.
 
@@ -79,8 +79,8 @@ def process_network_prefixes(
             reused_count += 1
 
         evidence_records = evidence_store.for_object(
-            "as_prefix",
             as_prefix.id,
+            object_type="as_prefix",
         )
 
         for evidence in evidence_records:

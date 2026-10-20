@@ -6,8 +6,8 @@ from collections.abc import Iterable, Mapping
 from netvoyager_core.logging import get_logger
 from netvoyager_network.device import NetworkDevice
 
-from ..evidence.models import EvidenceRecord
-from ..evidence.store import EvidenceStore
+from netvoyager_intelligence.evidence import EvidenceRecord
+from netvoyager_analysis.protocols.evidence import EvidenceRepositoryProtocol
 from .protocols import DeviceObservation
 
 
@@ -18,7 +18,7 @@ def process_device_observations(
     observations: Iterable[DeviceObservation],
     *,
     source: str,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     context: Mapping[str, object] | None = None,
 ) -> list[NetworkDevice]:
     """Create network devices and record evidence for device observations.

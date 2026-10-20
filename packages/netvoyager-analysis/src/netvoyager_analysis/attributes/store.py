@@ -11,7 +11,7 @@ updates and conflict reconciliation are managed separately.
 from dataclasses import replace
 from uuid import UUID
 
-from ..evidence.store import EvidenceStore
+from ..protocols.evidence import EvidenceRepositoryProtocol
 from ..policies.models import PolicyEvaluationResult
 from .models import (
     AttributeAssertion,
@@ -29,14 +29,14 @@ class AttributeAssertionStore:
     are immutable; updates replace stored snapshots rather than modifying
     objects returned to callers.
 
-    Evidence records remain in EvidenceStore. Decisions preserve the
+    Evidence records remain in the Evidence repository. Decisions preserve the
     validation history without modifying original observations.
     """
 
     def __init__(
         self,
         *,
-        evidence_store: EvidenceStore,
+        evidence_store: EvidenceRepositoryProtocol,
     ) -> None:
         self._evidence_store = evidence_store
 
@@ -359,7 +359,8 @@ class AttributeAssertionStore:
     ) -> None:
         """Ensure every referenced evidence record exists."""
         for evidence_id in evidence_ids:
-            self._evidence_store.get(evidence_id)
+            if self._evidence_store.get(evidence_id) is None:
+                raise KeyError(evidence_id)
 
     @property
     def assertions(self) -> tuple[AttributeAssertion, ...]:

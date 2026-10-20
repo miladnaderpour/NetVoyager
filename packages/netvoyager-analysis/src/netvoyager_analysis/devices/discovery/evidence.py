@@ -1,54 +1,35 @@
-
 """Retrieve evidence associated with resolved network devices.
 
 Combine direct canonical-device evidence with evidence belonging to
 discovery candidates that have been resolved to the same device.
 
-Candidate resolution is obtained from DeviceDiscoveryStore.
-EvidenceStore remains responsible only for provenance and object links.
+Evidence is retrieved through the repository protocol.
+Candidate resolution is provided by the discovery registry.
 """
 
 from uuid import UUID
 
-from ...evidence.models import EvidenceRecord
-from ...evidence.store import EvidenceStore
+from netvoyager_intelligence.evidence import EvidenceRecord
 from netvoyager_network.device.discovery.store import DeviceDiscoveryStore
+
+from netvoyager_analysis.protocols.evidence import (
+    EvidenceRepositoryProtocol,
+)
 
 
 def evidence_for_device(
     device_id: UUID,
     *,
-    evidence_store: EvidenceStore,
+    evidence_store: EvidenceRepositoryProtocol,
     discovery_store: DeviceDiscoveryStore,
 ) -> tuple[EvidenceRecord, ...]:
-    """Return complete linked evidence for a canonical network device.
+    """Return evidence linked to a device and its resolved candidates."""
 
-    Include evidence directly linked to the NetworkDevice and evidence
-    linked to candidates currently resolved to that device.
-
-    The discovery store determines candidate-to-device associations.
-    EvidenceStore performs indexed retrieval using supplied object IDs.
-
-    Repeated evidence records are returned once in original insertion
-    order. Original candidate evidence links remain unchanged.
-
-    Candidate relationship decision history is managed separately
-    by DeviceDiscoveryStore.
-    """
-    object_keys: list[tuple[str, UUID | str]] = [
-        ("network_device", device_id),
-    ]
-
-    candidates = discovery_store.candidates_for_device(
-        device_id
+    candidate_ids = (
+        candidate.candidate_id
+        for candidate in discovery_store.candidates_for_device(device_id)
     )
 
-    object_keys.extend(
-        (
-            "device_discovery_candidate",
-            candidate.candidate_id,
-        )
-        for candidate in candidates
+    return evidence_store.for_objects(
+        (device_id, *candidate_ids)
     )
-
-    return evidence_store.for_objects(object_keys)
