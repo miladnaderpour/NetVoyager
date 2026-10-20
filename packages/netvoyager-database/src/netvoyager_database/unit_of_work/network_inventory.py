@@ -1,9 +1,8 @@
 
 """Unit of Work for network inventory and intelligence persistence.
 
-Device, evidence, and finding repositories share one SQLAlchemy session
-and transaction. Discovery persistence is integrated separately when
-its concrete repository implementation is available.
+Devices, discovery, evidence, and findings share one SQLAlchemy session
+and one transaction.
 """
 
 from __future__ import annotations
@@ -16,6 +15,9 @@ from netvoyager_database.exceptions import TransactionError
 from netvoyager_database.repositories.devices.network_device import (
     SqlNetworkDeviceRepository,
 )
+from netvoyager_database.repositories.discovery import (
+    SqlDeviceDiscoveryRepository,
+)
 from netvoyager_database.repositories.evidence import (
     SqlEvidenceRepository,
 )
@@ -26,12 +28,10 @@ from netvoyager_database.unit_of_work.base import BaseUnitOfWork
 
 
 class NetworkInventoryUnitOfWork(BaseUnitOfWork):
-    """Coordinate inventory and intelligence repository transactions.
+    """Coordinate device and intelligence repositories transactionally.
 
-    All repositories use the same active database session.
-
-    Changes are committed explicitly. Uncommitted work is rolled back
-    by BaseUnitOfWork when the transaction scope exits.
+    All repositories operate on the same active database session.
+    Changes require an explicit commit.
     """
 
     def __init__(
@@ -42,6 +42,7 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         super().__init__(session_factory)
 
         self._devices: SqlNetworkDeviceRepository | None = None
+        self._discovery: SqlDeviceDiscoveryRepository | None = None
         self._evidence: SqlEvidenceRepository | None = None
         self._findings: SqlFindingRepository | None = None
 
@@ -57,6 +58,19 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
             )
 
         return self._devices
+
+    @property
+    def discovery(self) -> SqlDeviceDiscoveryRepository:
+        """Return the physical-device discovery repository."""
+        self._require_active()
+
+        if self._discovery is None:
+            raise TransactionError(
+                code="storage.repository_not_initialized",
+                message="The discovery repository is not initialized.",
+            )
+
+        return self._discovery
 
     @property
     def evidence(self) -> SqlEvidenceRepository:
@@ -85,9 +99,10 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         return self._findings
 
     def _initialize_repositories(self) -> None:
-        """Initialize repositories using the active database session."""
+        """Initialize all repositories using the active database session."""
         session = self.session
 
         self._devices = SqlNetworkDeviceRepository(session)
+        self._discovery = SqlDeviceDiscoveryRepository(session)
         self._evidence = SqlEvidenceRepository(session)
         self._findings = SqlFindingRepository(session)

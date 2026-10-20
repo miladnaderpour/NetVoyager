@@ -13,7 +13,11 @@ dependencies = [
     "netvoyager-network>=0.1.0",
     "netvoyager-intelligence>=0.1.0",
     "SQLAlchemy>=2.0,<2.1",
+    "alembic>=1.13,<2",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"netvoyager_database.migrations" = ["*.mako"]

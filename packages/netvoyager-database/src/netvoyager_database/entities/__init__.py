@@ -3,12 +3,14 @@
 
 from .devices import (
     DeviceDiscoveryCandidateEntity,
+    DeviceDiscoveryDecisionEntity,
     DeviceDiscoveryRelationshipEntity,
     NetworkDeviceEntity,
 )
 
 __all__ = [
     "DeviceDiscoveryCandidateEntity",
+    "DeviceDiscoveryDecisionEntity",
     "DeviceDiscoveryRelationshipEntity",
     "NetworkDeviceEntity",
 ]
