@@ -243,3 +243,55 @@ def test_findings_require_active_unit_of_work(
 
     with pytest.raises(TransactionError):
         _ = uow.findings
+
+
+def test_finding_conflict_rolls_back_evidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Roll back evidence when a finding insert fails in the same UoW."""
+    finding_id = uuid4()
+
+    original = Finding(
+        kind="identity_conflict",
+        severity="warning",
+        message="Original finding.",
+        id=finding_id,
+    )
+
+    # Establish an existing, committed finding.
+    with NetworkInventoryUnitOfWork(session_factory) as uow:
+        uow.findings.add(original)
+        uow.commit()
+
+    evidence = EvidenceRecord(
+        source="excel",
+        details={"row": 42},
+    )
+    evidence_id = evidence.id
+
+    conflicting = Finding(
+        kind="identity_conflict",
+        severity="error",
+        message="Conflicting finding identity.",
+        id=finding_id,
+    )
+
+    # Evidence is flushed first, then the finding causes a conflict.
+    # Neither operation may partially commit this transaction.
+    with pytest.raises(RepositoryConflictError) as exc_info:
+        with NetworkInventoryUnitOfWork(session_factory) as uow:
+            uow.evidence.add(evidence)
+            uow.findings.add(conflicting)
+            uow.commit()
+
+    assert exc_info.value.code == "storage.finding_conflict"
+
+    # Verify rollback using a fresh transaction.
+    with NetworkInventoryUnitOfWork(session_factory) as uow:
+        assert uow.evidence.get(evidence_id) is None
+
+        persisted = uow.findings.get(finding_id)
+
+        assert persisted is not None
+        assert persisted.message == "Original finding."
+        assert persisted.severity == "warning"

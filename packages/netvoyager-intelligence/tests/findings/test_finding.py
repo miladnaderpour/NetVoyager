@@ -214,3 +214,4 @@ def test_uncommitted_finding_is_rolled_back(
 
     with session_factory() as session:
         assert session.get(Finding, finding_id) is None
+
