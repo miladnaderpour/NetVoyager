@@ -1,3 +1,4 @@
+
 """Source identity and normalized collection datasets."""
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from uuid import UUID, uuid4
 if TYPE_CHECKING:
     from netvoyager_analysis.devices.observations import DeviceObservation
     from netvoyager_analysis.neighbors.observations import NeighborObservation
+    from netvoyager_analysis.ipam.observations import PrefixObservation
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -34,6 +36,7 @@ class SourceDataset:
     source: Source
     devices: tuple[DeviceObservation, ...] = ()
     neighbors: tuple[NeighborObservation, ...] = ()
+    network_prefixes: tuple[PrefixObservation, ...] = ()
     collected_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

@@ -125,3 +125,4 @@ def test_prefix_requires_typed_network_and_address_space_id():
             prefix=IPv4Network("192.0.2.0/24"),
             address_space_id="global",
         )
+ 
