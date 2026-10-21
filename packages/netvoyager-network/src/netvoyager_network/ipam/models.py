@@ -1,63 +1,61 @@
-"""Shared IPAM domain models for IPv4 network prefixes.
 
-Importers are responsible for parsing and validating external values before
-constructing these models. Type annotations describe the expected Python
-types; they do not perform runtime conversion or validation.
+"""Shared, framework-independent IPAM domain models.
+
+Importers normalize and validate input before constructing domain objects.
+An unknown observation address space must remain unresolved; the default
+below is for deliberately constructed canonical prefixes only.
 """
 
 from dataclasses import dataclass, field
-from ipaddress import IPv4Network
+from ipaddress import IPv4Network, IPv6Network
 from uuid import UUID, uuid5
+
+from .address_space import GLOBAL_ADDRESS_SPACE_ID
 
 NETWORK_PREFIX_NAMESPACE = UUID(
     "b9a7da8a-5b4f-4f05-8a71-163056b8d682"
 )
 
 
-
 @dataclass(frozen=True, slots=True)
 class NetworkPrefix:
-    """A canonical IPv4 network prefix independent of its observation source.
+    """An accepted prefix uniquely identified within one address space.
 
-    Identity is deterministically generated from the normalized IPv4 prefix.
-
-    Site ownership, routing context, and ASN associations are managed
-    separately.
+    Site ownership, routing context and ASN attribution remain separate.
     """
 
-    prefix: IPv4Network = field(compare=False)
-
+    prefix: IPv4Network | IPv6Network
+    address_space_id: UUID = GLOBAL_ADDRESS_SPACE_ID
     id: UUID = field(init=False)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.prefix, (IPv4Network, IPv6Network)):
+            raise TypeError(
+                "NetworkPrefix.prefix must be an IPv4Network or IPv6Network"
+            )
+
+        if not isinstance(self.address_space_id, UUID):
+            raise TypeError(
+                "NetworkPrefix.address_space_id must be a UUID"
+            )
+
         object.__setattr__(
             self,
             "id",
             uuid5(
                 NETWORK_PREFIX_NAMESPACE,
-                f"network-prefix:{self.prefix.with_prefixlen}",
+                f"network-prefix:{self.address_space_id}:"
+                f"{self.prefix.with_prefixlen}",
             ),
         )
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class NetworkPrefixMatchResult:
-    """Best canonical prefix match for an IPv4 address.
+    """Best canonical prefix match for an address.
 
-    match contains the most-specific NetworkPrefix containing the requested
-    address. None means that no supplied prefix matched.
-
-    matched_prefix_length records the best prefix length found before
-    applying the minimum-length policy. None means no prefix matched.
-
-    is_broader_than_expected indicates that the best matching prefix was
-    shorter than the requested minimum.
-
-    When broad matches are skipped, match is None while
-    matched_prefix_length and is_broader_than_expected preserve information
-    about the rejected match.
+    The existing matcher currently supports IPv4 only. Its address-space
+    filtering will be revised in the matching milestone.
     """
 
     match: NetworkPrefix | None = None
