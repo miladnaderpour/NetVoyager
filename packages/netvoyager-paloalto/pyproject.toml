@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Palo Alto integrations for NetVoyager"
 requires-python = ">=3.11"
 dependencies = [
+    "PyYAML>=6,<7",
     "netvoyager-core>=0.1,<0.2",
 ]
 

@@ -144,7 +144,7 @@ class SqlNetworkDeviceRepository:
             "Canonical device inserted",
             extra={
                 "device_id": str(device.device_id),
-                "name": device.name,
+                "device_name": device.name,
             },
         )
 

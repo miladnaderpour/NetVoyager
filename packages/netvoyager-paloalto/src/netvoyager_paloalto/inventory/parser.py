@@ -1,10 +1,13 @@
+
 """Parse JSON exports produced by the Panorama inventory collector."""
 
 import json
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from typing import Any, cast
+from uuid import UUID
 from xml.etree import ElementTree
 
 from .models import (
@@ -69,8 +72,13 @@ def _timestamp(value: Any, path: str) -> datetime:
 
 
 class _Parser:
-    def __init__(self, schema_version: str) -> None:
+    def __init__(
+        self,
+        schema_version: str,
+        address_space_mapping: Mapping[str, UUID] | None = None,
+    ) -> None:
         self.schema_version = schema_version
+        self.address_space_mapping = dict(address_space_mapping or {})
         self.issues: list[PanoramaImportIssue] = []
         self.serial: str | None = None
 
@@ -139,7 +147,6 @@ class _Parser:
         value: str | None,
         path: str,
     ) -> IPv4Network | None:
-        # Do not let a bare address implicitly become a /32.
         if value is None or "/" not in value:
             self.issue(
                 path,
@@ -261,7 +268,6 @@ class _Parser:
             data.get("raw_xml"), f"{path}.raw_xml"
         )
 
-        # Recover the serial missed by the original v2 collector.
         if peer_serial is None and raw_xml:
             try:
                 upper = raw_xml.upper()
@@ -347,8 +353,10 @@ class _Parser:
             data.get("virtual_router"), f"{path}.virtual_router"
         )
 
-        raw = data.get("configured_value")
-        text = _required_text(raw, f"{path}.configured_value")
+        raw = _required_text(
+            data.get("configured_value"),
+            f"{path}.configured_value",
+        )
         reported = self.text(
             data.get("prefix"), f"{path}.prefix"
         )
@@ -356,9 +364,9 @@ class _Parser:
         address = None
         prefix_length = None
 
-        if "/" in text:
+        if "/" in raw:
             try:
-                parsed = IPv4Interface(text)
+                parsed = IPv4Interface(raw)
                 address = parsed.ip
                 prefix_length = parsed.network.prefixlen
             except ValueError:
@@ -368,8 +376,7 @@ class _Parser:
                     raw,
                 )
 
-                # Retain a valid host address even if its mask is invalid.
-                host_text = text.split("/", 1)[0]
+                host_text = raw.split("/", 1)[0]
 
                 try:
                     address = IPv4Address(host_text)
@@ -377,7 +384,7 @@ class _Parser:
                     pass
         else:
             address = self.address(
-                text, f"{path}.configured_value"
+                raw, f"{path}.configured_value"
             )
 
             if address is not None:
@@ -398,6 +405,7 @@ class _Parser:
             configured_value=raw,
             reported_prefix=reported,
             record_index=index,
+            address_space_id=self.address_space_mapping.get(router),
         )
 
         self.check_reported_prefix(
@@ -414,8 +422,11 @@ class _Parser:
         router = _required_text(
             data.get("virtual_router"), f"{path}.virtual_router"
         )
-        raw = data.get("configured_value")
-        _required_text(raw, f"{path}.configured_value")
+
+        raw = _required_text(
+            data.get("configured_value"),
+            f"{path}.configured_value",
+        )
 
         destination = self.network(
             raw, f"{path}.configured_value"
@@ -443,6 +454,7 @@ class _Parser:
             configured_value=raw,
             reported_prefix=reported,
             record_index=index,
+            address_space_id=self.address_space_mapping.get(router),
         )
 
     def collection_status(
@@ -635,13 +647,31 @@ class _Parser:
 
 def parse_panorama_inventory(
     raw_text: str,
+    *,
+    address_space_mapping: Mapping[str, UUID] | None = None,
 ) -> PanoramaInventoryResult:
     """Parse a schema 2.0 or 2.1 export.
 
     Invalid JSON or an incompatible report structure raises ValueError.
     Record-level problems are retained as parsing issues.
     Valid records, duplicates, and original values are preserved.
+
+    With no mapping, all parsed interface addresses and static routes
+    have address_space_id=None.
+
+    Only explicitly mapped virtual routers receive an AddressSpace.
     """
+    if address_space_mapping is not None:
+        for name, space_id in address_space_mapping.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    "Virtual-router mapping keys must be nonempty strings"
+                )
+            if not isinstance(space_id, UUID):
+                raise TypeError(
+                    "AddressSpace mapping values must be UUIDs"
+                )
+
     data = _object(
         json.loads(raw_text.lstrip("\ufeff")),
         "$",
@@ -689,7 +719,10 @@ def parse_panorama_inventory(
         )
     )
 
-    parser = _Parser(schema_version=version)
+    parser = _Parser(
+        schema_version=version,
+        address_space_mapping=address_space_mapping,
+    )
     firewalls: list[FirewallInventory] = []
     seen_serials: set[str] = set()
 

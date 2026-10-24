@@ -10,6 +10,8 @@ claims:
     authority: trusted
     actions:
       record_observation: {}
+      create_candidate: {}
+      correlate_candidate: {}
       create_canonical_prefix:
         requirements:
           - valid_network_prefix

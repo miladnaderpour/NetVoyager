@@ -2,7 +2,8 @@
 source_id: paloalto_panorama
 method: managed_device_inventory
 description: Panorama managed physical firewall inventory
-version: 1
+version: 2
+fully_trusted: false
 
 claims:
   - claim: device.physical_identity
@@ -60,6 +61,21 @@ claims:
         requirements:
           - verified_device_identity
           - verified_management_address
+
+  - claim: prefix.existence
+    authority: trusted
+    actions:
+      record_observation: {}
+      create_candidate: {}
+      correlate_candidate: {}
+      create_canonical_prefix:
+        requirements:
+          - valid_network_prefix
+          - verified_reporting_source
+      promote_candidate:
+        requirements:
+          - valid_network_prefix
+          - verified_reporting_source
 
   - claim: relationship.device_site
     authority: supporting

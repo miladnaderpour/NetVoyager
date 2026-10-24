@@ -1,9 +1,11 @@
+
 """Models for firewall inventory collected through Panorama."""
 
 from dataclasses import dataclass
 from datetime import datetime
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from typing import Literal
+from uuid import UUID
 
 
 CollectionState = Literal["pending", "success", "partial", "failed"]
@@ -64,6 +66,7 @@ class InterfaceAddress:
     configured_value: str
     reported_prefix: str | None
     record_index: int
+    address_space_id: UUID | None = None
 
     @property
     def interface_address(self) -> IPv4Interface | None:
@@ -89,6 +92,7 @@ class StaticRoute:
     configured_value: str
     reported_prefix: str | None
     record_index: int
+    address_space_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +104,6 @@ class BgpPeer:
     peer_as: int | None
     raw_peer_as: str | None
 
-    # Strings preserve addresses, FQDNs, and address-object references.
     peer_address_ip: str | None
     peer_address_fqdn: str | None
     local_interface: str | None
@@ -121,10 +124,7 @@ class BgpPeerGroup:
 
 @dataclass(frozen=True, slots=True)
 class BgpRule:
-    """Ordered policy or redistribution rule.
-
-    Detailed matches and actions are preserved in raw_xml.
-    """
+    """Ordered policy or redistribution rule."""
 
     name: str
     enabled: bool | None
@@ -183,8 +183,6 @@ class FirewallInventory:
     interface_addresses: tuple[InterfaceAddress, ...]
     static_routes: tuple[StaticRoute, ...]
     collection_status: CollectionStatus
-
-    # None means unavailable/not collected; () means an empty collection.
     virtual_routers: tuple[VirtualRouterConfiguration, ...] | None = None
 
 
