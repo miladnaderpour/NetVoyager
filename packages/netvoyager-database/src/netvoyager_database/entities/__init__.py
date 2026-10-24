@@ -14,6 +14,8 @@ from .ipam import (
     PrefixObservationEntity,
     PrefixDiscoveryDecisionEntity,
     PrefixDiscoveryRelationshipEntity,
+    AddressSpaceEntity,
+    NetworkPrefixEntity
 )
 
 __all__ = [
@@ -26,4 +28,6 @@ __all__ = [
     "PrefixObservationEntity",
     "PrefixDiscoveryDecisionEntity",
     "PrefixDiscoveryRelationshipEntity",
+    "AddressSpaceEntity",
+    "NetworkPrefixEntity",
 ]

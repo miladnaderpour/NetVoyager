@@ -7,6 +7,7 @@ from .prefix_discovery import (
 )
 from .discovery_relationship import PrefixDiscoveryRelationshipEntity
 from .discovery_decision import PrefixDiscoveryDecisionEntity
+from .canonical import AddressSpaceEntity, NetworkPrefixEntity
 
 __all__ = [
     "PrefixObservationEntity",
@@ -14,4 +15,6 @@ __all__ = [
     "PrefixCandidateObservationEntity",
     "PrefixDiscoveryRelationshipEntity",
     "PrefixDiscoveryDecisionEntity",
+    "AddressSpaceEntity",
+    "NetworkPrefixEntity",
 ]

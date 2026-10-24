@@ -9,6 +9,7 @@ from .discovery import DeviceDiscoveryRepositoryProtocol
 from .evidence import EvidenceRepositoryProtocol
 from .findings import FindingRepositoryProtocol
 from .prefix_discovery import PrefixDiscoveryRepositoryProtocol
+from .network_prefixes import NetworkPrefixRepositoryProtocol
 
 
 class UnitOfWorkProtocol(Protocol):
@@ -37,6 +38,11 @@ class UnitOfWorkProtocol(Protocol):
     @property
     def prefix_discovery(self) -> PrefixDiscoveryRepositoryProtocol:
         """Return the network-prefix discovery repository."""
+        ...
+
+    @property
+    def network_prefixes(self) -> NetworkPrefixRepositoryProtocol:
+        """Return the canonical IPAM repository."""
         ...
 
     @property

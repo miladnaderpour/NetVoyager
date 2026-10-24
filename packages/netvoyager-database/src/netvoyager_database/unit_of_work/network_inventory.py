@@ -27,6 +27,11 @@ from netvoyager_database.repositories.findings import (
 from netvoyager_database.repositories.ipam.prefix_discovery import (
     SqlPrefixDiscoveryRepository,
 )
+
+from netvoyager_database.repositories.ipam.canonical import (
+    SqlNetworkPrefixRepository,
+)
+
 from netvoyager_database.unit_of_work.base import BaseUnitOfWork
 
 
@@ -49,6 +54,7 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         self._evidence: SqlEvidenceRepository | None = None
         self._findings: SqlFindingRepository | None = None
         self._prefix_discovery: SqlPrefixDiscoveryRepository | None = None
+        self._network_prefixes: SqlNetworkPrefixRepository | None = None
 
     @property
     def devices(self) -> SqlNetworkDeviceRepository:
@@ -115,6 +121,19 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
 
         return self._prefix_discovery
 
+    @property
+    def network_prefixes(self) -> SqlNetworkPrefixRepository:
+        """Return the canonical IPAM repository."""
+        self._require_active()
+
+        if self._network_prefixes is None:
+            raise TransactionError(
+                code="storage.repository_not_initialized",
+                message="The canonical IPAM repository is not initialized.",
+            )
+
+        return self._network_prefixes
+
     def _initialize_repositories(self) -> None:
         """Initialize all repositories using the active database session."""
         session = self.session
@@ -124,3 +143,4 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         self._evidence = SqlEvidenceRepository(session)
         self._findings = SqlFindingRepository(session)
         self._prefix_discovery = SqlPrefixDiscoveryRepository(session)
+        self._network_prefixes = SqlNetworkPrefixRepository(session)
