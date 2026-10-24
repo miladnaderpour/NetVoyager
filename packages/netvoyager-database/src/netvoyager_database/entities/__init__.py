@@ -8,9 +8,22 @@ from .devices import (
     NetworkDeviceEntity,
 )
 
+from .ipam import (
+    PrefixCandidateObservationEntity,
+    PrefixDiscoveryCandidateEntity,
+    PrefixObservationEntity,
+    PrefixDiscoveryDecisionEntity,
+    PrefixDiscoveryRelationshipEntity,
+)
+
 __all__ = [
     "DeviceDiscoveryCandidateEntity",
     "DeviceDiscoveryDecisionEntity",
     "DeviceDiscoveryRelationshipEntity",
     "NetworkDeviceEntity",
+    "PrefixCandidateObservationEntity",
+    "PrefixDiscoveryCandidateEntity",
+    "PrefixObservationEntity",
+    "PrefixDiscoveryDecisionEntity",
+    "PrefixDiscoveryRelationshipEntity",
 ]
