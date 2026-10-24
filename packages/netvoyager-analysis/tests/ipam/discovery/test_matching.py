@@ -1,4 +1,3 @@
-
 """Tests for pure prefix discovery identity comparison."""
 
 from dataclasses import replace
@@ -49,7 +48,7 @@ def test_same_prefix_and_space_exact_match():
     "observed_known,candidate_known",
     [(True, False), (False, True), (False, False)],
 )
-def test_unknown_space_produces_possible_match(
+def test_unknown_space_does_not_match_on_cidr_alone(
     observed_known,
     candidate_known,
 ):
@@ -61,8 +60,7 @@ def test_unknown_space_produces_possible_match(
         candidate(prefix, space_id if candidate_known else None),
     )
 
-    assert result is not None
-    assert result.strength == "possible"
+    assert result is None
 
 
 def test_different_known_spaces_do_not_match():
@@ -77,18 +75,22 @@ def test_different_known_spaces_do_not_match():
 
 
 def test_different_prefixes_do_not_match():
+    space_id = uuid4()
+
     result = compare_prefix_observation(
-        observation(IPv4Network("192.0.2.0/24")),
-        candidate(IPv4Network("198.51.100.0/24")),
+        observation(IPv4Network("192.0.2.0/24"), space_id),
+        candidate(IPv4Network("198.51.100.0/24"), space_id),
     )
 
     assert result is None
 
 
 def test_containing_prefix_is_not_identity_match():
+    space_id = uuid4()
+
     result = compare_prefix_observation(
-        observation(IPv4Network("192.0.2.0/25")),
-        candidate(IPv4Network("192.0.2.0/24")),
+        observation(IPv4Network("192.0.2.0/25"), space_id),
+        candidate(IPv4Network("192.0.2.0/24"), space_id),
     )
 
     assert result is None
@@ -128,11 +130,12 @@ def test_ipv6_prefix_match():
 @pytest.mark.parametrize("status", ["rejected", "retired"])
 def test_inactive_candidate_not_matched(status):
     prefix = IPv4Network("192.0.2.0/24")
-    existing = candidate(prefix)
+    space_id = uuid4()
+    existing = candidate(prefix, space_id)
     existing = replace(existing, status=status)
 
     result = compare_prefix_observation(
-        observation(prefix),
+        observation(prefix, space_id),
         existing,
     )
 
@@ -141,11 +144,12 @@ def test_inactive_candidate_not_matched(status):
 
 def test_comparison_does_not_mutate_candidate():
     prefix = IPv4Network("192.0.2.0/24")
-    existing = candidate(prefix)
+    space_id = uuid4()
+    existing = candidate(prefix, space_id)
     original_id = existing.candidate_id
 
     result = compare_prefix_observation(
-        observation(prefix),
+        observation(prefix, space_id),
         existing,
     )
 

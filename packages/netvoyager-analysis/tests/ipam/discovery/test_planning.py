@@ -1,4 +1,3 @@
-
 """Tests for non-mutating prefix observation assignment planning."""
 
 from dataclasses import replace
@@ -59,18 +58,27 @@ def test_missing_candidate_proposes_new_one():
     assert result.observation_id == item.observation_id
 
 
-def test_unknown_address_space_keeps_candidates_separate():
-    existing = candidate(space=uuid4())
+@pytest.mark.parametrize(
+    "observed_known,candidate_known",
+    [(True, False), (False, True), (False, False)],
+)
+def test_unknown_address_space_keeps_candidates_separate(
+    observed_known,
+    candidate_known,
+):
+    space = uuid4()
+    existing = candidate(
+        space=space if candidate_known else None,
+    )
 
     result = plan_prefix_observation_assignment(
-        observed(),
+        observed(space=space if observed_known else None),
         [existing],
     )
 
     assert result.action == "create_candidate"
     assert result.candidate.candidate_id != existing.candidate_id
-    assert len(result.possible_matches) == 1
-    assert result.possible_matches[0].strength == "possible"
+    assert result.possible_matches == ()
 
 
 def test_multiple_exact_matches_do_not_choose_arbitrarily():

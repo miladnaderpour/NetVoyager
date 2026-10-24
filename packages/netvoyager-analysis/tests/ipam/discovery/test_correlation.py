@@ -1,4 +1,3 @@
-
 """Tests for non-destructive prefix candidate correlation."""
 
 from dataclasses import replace
@@ -36,7 +35,7 @@ def candidate(
     )
 
 
-def test_equal_prefix_and_space_proposes_possible():
+def test_equal_prefix_and_known_space_proposes_possible():
     space = uuid4()
     first = candidate(space=space)
     second = candidate(space=space)
@@ -47,13 +46,31 @@ def test_equal_prefix_and_space_proposes_possible():
     assert result.proposed[0].status == "possible"
 
 
-def test_unknown_space_allows_provisional_correlation():
+def test_unknown_known_spaces_do_not_correlate():
     first = candidate(space=uuid4())
     second = candidate()
 
     result = correlate_prefix_candidates([first, second])
 
-    assert len(result.proposed) == 1
+    assert result.proposed == ()
+
+
+def test_unknown_unknown_spaces_do_not_correlate():
+    first = candidate()
+    second = candidate()
+
+    result = correlate_prefix_candidates([first, second])
+
+    assert result.proposed == ()
+
+
+def test_isolated_sites_do_not_produce_relationship_explosion():
+    candidates = [candidate() for _ in range(75)]
+
+    result = correlate_prefix_candidates(candidates)
+
+    assert result.proposed == ()
+    assert len({c.candidate_id for c in candidates}) == 75
 
 
 def test_different_known_spaces_are_not_correlated():
@@ -66,8 +83,9 @@ def test_different_known_spaces_are_not_correlated():
 
 
 def test_different_prefixes_are_not_correlated():
-    first = candidate("192.0.2.0/24")
-    second = candidate("198.51.100.0/24")
+    space = uuid4()
+    first = candidate("192.0.2.0/24", space=space)
+    second = candidate("198.51.100.0/24", space=space)
 
     result = correlate_prefix_candidates([first, second])
 
@@ -75,8 +93,9 @@ def test_different_prefixes_are_not_correlated():
 
 
 def test_existing_rejected_relationship_is_preserved():
-    first = candidate()
-    second = candidate()
+    space = uuid4()
+    first = candidate(space=space)
+    second = candidate(space=space)
 
     rejected = PrefixDiscoveryCandidateRelationship(
         first.candidate_id,
@@ -94,8 +113,9 @@ def test_existing_rejected_relationship_is_preserved():
 
 
 def test_existing_confirmed_relationship_is_not_duplicated():
-    first = candidate()
-    second = candidate()
+    space = uuid4()
+    first = candidate(space=space)
+    second = candidate(space=space)
 
     confirmed = PrefixDiscoveryCandidateRelationship(
         first.candidate_id,
@@ -112,7 +132,7 @@ def test_existing_confirmed_relationship_is_not_duplicated():
 
 
 def test_duplicate_candidates_do_not_create_self_relationship():
-    first = candidate()
+    first = candidate(space=uuid4())
 
     result = correlate_prefix_candidates([first, first])
 
@@ -120,9 +140,10 @@ def test_duplicate_candidates_do_not_create_self_relationship():
 
 
 def test_inactive_candidates_are_excluded():
-    active = candidate()
-    rejected = candidate(status="rejected")
-    retired = candidate(status="retired")
+    space = uuid4()
+    active = candidate(space=space)
+    rejected = candidate(space=space, status="rejected")
+    retired = candidate(space=space, status="retired")
 
     result = correlate_prefix_candidates(
         [active, rejected, retired]
@@ -142,7 +163,8 @@ def test_ipv6_correlation():
 
 
 def test_correlation_is_order_independent():
-    candidates = [candidate() for _ in range(3)]
+    space = uuid4()
+    candidates = [candidate(space=space) for _ in range(3)]
 
     forward = correlate_prefix_candidates(candidates)
     reverse = correlate_prefix_candidates(reversed(candidates))
@@ -163,8 +185,9 @@ def test_conflicting_candidate_snapshots_are_rejected():
 
 
 def test_correlation_does_not_mutate_candidates():
-    first = candidate()
-    second = candidate()
+    space = uuid4()
+    first = candidate(space=space)
+    second = candidate(space=space)
 
     result = correlate_prefix_candidates([first, second])
 

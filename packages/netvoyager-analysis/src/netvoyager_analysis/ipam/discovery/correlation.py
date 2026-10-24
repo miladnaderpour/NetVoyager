@@ -1,8 +1,10 @@
-
 """Pure, non-destructive correlation of prefix discovery candidates.
 
-Only candidates with the same normalized CIDR are compared. Correlation
-proposes relationships; it never changes identities or lifecycle states.
+Only candidates with the same normalized CIDR and explicitly matching
+AddressSpaces are correlated.
+
+Correlation proposes relationships; it never changes identities or
+lifecycle states.
 """
 
 from collections.abc import Iterable
@@ -30,11 +32,13 @@ def correlate_prefix_candidates(
         PrefixDiscoveryCandidateRelationship
     ] = (),
 ) -> PrefixCorrelationResult:
-    """Propose compatible candidate relationships, grouped by exact CIDR.
+    """Propose relationships for matching CIDR and known AddressSpace.
 
-    Different known address spaces never correlate. Missing address-space
-    information may yield a possible relationship. Existing relationships,
-    including rejected relationships, always suppress a new proposal.
+    Unknown AddressSpaces are excluded from automatic CIDR-based
+    correlation. Different known AddressSpaces never correlate.
+
+    Existing relationships, including confirmed and rejected decisions,
+    remain untouched and suppress duplicate proposals.
     """
     unique: dict[UUID, PrefixDiscoveryCandidate] = {}
 
@@ -54,6 +58,7 @@ def correlate_prefix_candidates(
         if (
             candidate.status in {"rejected", "retired"}
             or candidate.prefix is None
+            or candidate.address_space_id is None
         ):
             continue
 
@@ -77,11 +82,7 @@ def correlate_prefix_candidates(
 
         for index, left in enumerate(group):
             for right in group[index + 1:]:
-                if (
-                    left.address_space_id is not None
-                    and right.address_space_id is not None
-                    and left.address_space_id != right.address_space_id
-                ):
+                if left.address_space_id != right.address_space_id:
                     continue
 
                 relationship = PrefixDiscoveryCandidateRelationship(
@@ -96,7 +97,6 @@ def correlate_prefix_candidates(
                 known_relationships.add(relationship.relationship_id)
                 proposed.append(relationship)
 
-    # Preserve the former global candidate-ID ordering across CIDR groups.
     proposed.sort(
         key=lambda item: (
             item.candidate_a_id,

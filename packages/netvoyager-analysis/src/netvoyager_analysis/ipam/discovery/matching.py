@@ -1,4 +1,3 @@
-
 """Pure prefix observation-to-candidate identity comparison."""
 
 from dataclasses import dataclass
@@ -27,10 +26,12 @@ def compare_prefix_observation(
     observation: PrefixObservation,
     candidate: PrefixDiscoveryCandidate,
 ) -> PrefixCandidateMatch | None:
-    """Compare normalized CIDR and explicit address-space information.
+    """Compare CIDR identity within an explicitly known AddressSpace.
 
-    An unknown address space is never interpreted as global.
-    Rejected or retired candidates are not eligible for matching.
+    Equal CIDRs alone cannot establish identity when either AddressSpace
+    is unknown. Unknown is never interpreted as global.
+
+    Rejected and retired candidates are excluded.
     """
     if candidate.status in {"rejected", "retired"}:
         return None
@@ -41,20 +42,18 @@ def compare_prefix_observation(
     observed_space = observation.address_space_id
     candidate_space = candidate.address_space_id
 
-    if observed_space is not None and candidate_space is not None:
-        if observed_space != candidate_space:
-            return None
+    if observed_space is None or candidate_space is None:
+        return None
 
-        return PrefixCandidateMatch(
-            observation.observation_id,
-            candidate.candidate_id,
-            "exact",
-            "Equal CIDR within the same explicitly identified AddressSpace",
-        )
+    if observed_space != candidate_space:
+        return None
 
     return PrefixCandidateMatch(
-        observation.observation_id,
-        candidate.candidate_id,
-        "possible",
-        "Equal CIDR with unresolved AddressSpace context",
+        observation_id=observation.observation_id,
+        candidate_id=candidate.candidate_id,
+        strength="exact",
+        reason=(
+            "Equal CIDR within the same explicitly identified "
+            "AddressSpace"
+        ),
     )
