@@ -1,0 +1,8 @@
+
+source_id: meraki
+method: api
+description: Administrator-authorized Meraki API source
+version: 1
+fully_trusted: true
+
+claims: []

@@ -106,9 +106,10 @@ class PrefixDiscoveryCandidateEntity(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False
     )
 
-    # A foreign key will be added when canonical prefix persistence exists.
     resolved_prefix_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True)
+        Uuid(as_uuid=True),
+        ForeignKey("network_prefixes.id"),
+        nullable=True,
     )
 
 

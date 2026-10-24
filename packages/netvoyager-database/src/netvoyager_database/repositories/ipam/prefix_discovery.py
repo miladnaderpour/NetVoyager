@@ -38,6 +38,11 @@ from netvoyager_database.mappers.ipam.prefix_discovery import (
     decision_to_domain,
     decision_to_entity,
 )
+
+from netvoyager_database.entities.ipam.canonical import (
+    NetworkPrefixEntity,
+)
+
 from netvoyager_database.exceptions import (
     RepositoryConflictError,
     RepositoryNotFoundError,
@@ -132,16 +137,52 @@ class SqlPrefixDiscoveryRepository:
             for entity in entities
         )
 
+    def _validate_resolved_prefix(
+        self,
+        candidate: PrefixDiscoveryCandidate,
+    ) -> None:
+        """Ensure a resolved candidate references a compatible prefix."""
+        if candidate.resolved_prefix_id is None:
+            return
+
+        canonical = self._session.get(
+            NetworkPrefixEntity,
+            candidate.resolved_prefix_id,
+        )
+
+        if canonical is None:
+            raise RepositoryConflictError(
+                code="storage.canonical_prefix_not_found",
+                message="Resolved canonical prefix does not exist.",
+            )
+
+        if candidate.prefix is None:
+            raise RepositoryConflictError(
+                code="storage.candidate_prefix_missing",
+                message="Resolved candidate must have a CIDR.",
+            )
+
+        if candidate.prefix.with_prefixlen != canonical.prefix:
+            raise RepositoryConflictError(
+                code="storage.canonical_prefix_mismatch",
+                message="Candidate and canonical prefix CIDRs differ.",
+            )
+
+        if (
+            candidate.address_space_id is not None
+            and candidate.address_space_id != canonical.address_space_id
+        ):
+            raise RepositoryConflictError(
+                code="storage.address_space_mismatch",
+                message="Candidate and canonical AddressSpaces differ.",
+            )
+        
     def add_candidate(
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        if candidate.resolved_prefix_id is not None:
-            raise ValueError(
-                "Canonical prefix persistence is required "
-                "before candidate resolution."
-            )
-
+        
+        self._validate_resolved_prefix(candidate)
         self._session.add(candidate_to_entity(candidate))
         self._flush(
             "storage.prefix_candidate_conflict",
@@ -152,12 +193,8 @@ class SqlPrefixDiscoveryRepository:
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        if candidate.resolved_prefix_id is not None:
-            raise ValueError(
-                "Canonical prefix persistence is required "
-                "before candidate resolution."
-            )
-
+        
+        self._validate_resolved_prefix(candidate)
         entity = self._session.get(
             PrefixDiscoveryCandidateEntity,
             candidate.candidate_id,

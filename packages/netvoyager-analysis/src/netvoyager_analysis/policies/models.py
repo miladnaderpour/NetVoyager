@@ -4,8 +4,11 @@
 Source policies describe which claims a collection method may establish
 and which actions are permitted for those claims.
 
-Policy evaluation, evidence validation, and reconciliation decisions
-are managed separately by the analysis layer.
+Administrators may explicitly designate a registered source profile as
+fully trusted. Full trust bypasses ordinary claim-level permissions and
+requirements, but not supported capability or data-integrity rules.
+
+Policy evaluation and reconciliation remain separate responsibilities.
 """
 
 from dataclasses import dataclass
@@ -24,10 +27,8 @@ SourceAuthority: TypeAlias = Literal[
 class SourceProfile:
     """Identify the origin and collection method of source observations.
 
-    A profile identifies how evidence was collected, independently of
-    the claims that the source is authorized to establish.
-
-    Trust permissions are defined in SourceTrustPolicy.
+    Source identity and collection method select a registered policy.
+    Neither inherently determines the authority of the source.
     """
 
     source_id: str
@@ -77,8 +78,6 @@ class ClaimPolicy:
 
     Each action has its own requirements. Claim authority remains
     independent of individual action permissions.
-
-    Policy evaluation and reconciliation are managed separately.
     """
 
     claim: str
@@ -127,28 +126,31 @@ class ClaimPolicy:
         return None
 
 
-
 @dataclass(frozen=True, slots=True)
 class SourceTrustPolicy:
-    """Define claim-level permissions for a source collection method.
+    """Define source permissions and administrator-assigned authority.
 
-    Each policy belongs to one source profile and contains independently
-    defined permissions for domain attributes and relationships.
+    Ordinary policies specify permissions for individual claims.
 
-    Policy versions allow reconciliation decisions to reference the
-    rules applied when those decisions were made.
+    When fully_trusted is True, every supported claim/action combination
+    is authorized without evaluating ordinary evidence requirements.
+    The full-trust designation is configured by an administrator.
 
-    Unspecified claims have no permissions by default.
+    Policy versions identify the rules used by reconciliation decisions.
     """
 
     profile: SourceProfile
     version: int
     claims: tuple[ClaimPolicy, ...] = ()
+    fully_trusted: bool = False
 
     def __post_init__(self) -> None:
-        """Validate policy version and claim uniqueness."""
-        if self.version < 1:
+        """Validate policy version, trust setting, and claim uniqueness."""
+        if type(self.version) is not int or self.version < 1:
             raise ValueError("Policy version must be positive")
+
+        if not isinstance(self.fully_trusted, bool):
+            raise ValueError("fully_trusted must be a boolean")
 
         claim_names = [policy.claim for policy in self.claims]
 
@@ -164,6 +166,7 @@ class SourceTrustPolicy:
                 return policy
 
         return None
+
 
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluationResult:
@@ -183,4 +186,3 @@ class PolicyEvaluationResult:
     def allowed(self) -> bool:
         """Return whether the action was authorized."""
         return self.status == "allowed"
-

@@ -1,11 +1,14 @@
 
 """Load, register, and evaluate source trust policies.
 
-The policy engine manages declarative source permissions for individual
-domain claims and relationships.
+The policy engine manages administrator-configured source authority for
+supported domain claims and actions.
 
-It does not establish source facts, validate physical identities, or
-modify canonical domain objects.
+Fully trusted source profiles bypass ordinary action permissions and
+evidence requirements. Capability validity and domain integrity remain
+the responsibility of NetVoyager.
+
+The engine does not establish source facts or modify canonical objects.
 """
 
 from collections.abc import Mapping
@@ -78,11 +81,13 @@ class PolicyEngine:
 
     Policies are registered by source identity and collection method.
 
-    Unknown sources, claims, actions, and unsatisfied requirements
-    are denied during evaluation.
+    Unknown source profiles and unsupported capabilities are denied.
 
-    Required condition results must come from trusted validators.
-    The engine does not independently verify their truth.
+    For ordinary policies, claim-level action permissions and
+    requirements determine authorization.
+
+    For fully trusted profiles, supported actions are authorized
+    without secondary evidence or requirement evaluation.
     """
 
     def __init__(self) -> None:
@@ -190,14 +195,16 @@ class PolicyEngine:
         action: str,
         requirements: Mapping[str, bool] | None = None,
     ) -> PolicyEvaluationResult:
-        """Evaluate whether a source may perform an action.
+        """Evaluate source authority for an operation.
 
-        Only requirements belonging to the requested action are evaluated.
+        Fully trusted policies bypass ordinary claim permissions and
+        requirements for supported actions.
 
-        Missing, unknown, and unsatisfied requirements deny permission.
+        Other policies must explicitly permit the action and satisfy
+        every configured requirement.
 
-        Requirement results must be supplied by a trusted validation
-        component, not directly from unverified source observations.
+        Requirement results for ordinary policies must be supplied
+        by a trusted validation component.
         """
         policy = self.get(source_id, method)
 
@@ -210,6 +217,39 @@ class PolicyEngine:
                 action=action,
                 authority="none",
                 reason="Source policy is not registered",
+            )
+
+        if (
+            claim not in SUPPORTED_CLAIMS
+            or action not in SUPPORTED_ACTIONS
+            or action not in CLAIM_ACTIONS.get(
+                claim,
+                frozenset(),
+            )
+        ):
+            return self._result(
+                source_id=source_id,
+                method=method,
+                version=policy.version,
+                claim=claim,
+                action=action,
+                authority=(
+                    "authoritative"
+                    if policy.fully_trusted
+                    else "none"
+                ),
+                reason="Unsupported claim or action",
+            )
+
+        if policy.fully_trusted:
+            return self._result(
+                source_id=source_id,
+                method=method,
+                version=policy.version,
+                claim=claim,
+                action=action,
+                authority="authoritative",
+                reason=None,
             )
 
         claim_policy = policy.get_claim(claim)
@@ -232,9 +272,6 @@ class PolicyEngine:
 
         if claim_policy.authority == "none":
             reason = "Source has no authority for this claim"
-
-        elif action not in CLAIM_ACTIONS.get(claim, frozenset()):
-            reason = "Action is not supported for this claim"
 
         elif action_policy is None:
             reason = "Action is not permitted by the source policy"
@@ -303,7 +340,14 @@ class PolicyEngine:
         root = self._mapping(
             document,
             "policy",
-            {"source_id", "method", "description", "version", "claims"},
+            {
+                "source_id",
+                "method",
+                "description",
+                "version",
+                "claims",
+                "fully_trusted",
+            },
         )
 
         source_id = self._text(root.get("source_id"), "source_id")
@@ -314,6 +358,13 @@ class PolicyEngine:
         if type(version) is not int or version < 1:
             raise PolicyEngineError(
                 "Policy version must be a positive integer"
+            )
+
+        fully_trusted = root.get("fully_trusted", False)
+
+        if not isinstance(fully_trusted, bool):
+            raise PolicyEngineError(
+                "fully_trusted must be a boolean"
             )
 
         description = root.get("description")
@@ -415,6 +466,7 @@ class PolicyEngine:
                 ),
                 version=version,
                 claims=tuple(claims),
+                fully_trusted=fully_trusted,
             )
         except ValueError as exc:
             raise PolicyEngineError(str(exc)) from exc

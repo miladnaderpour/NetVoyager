@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from ipaddress import IPv4Network
 from uuid import uuid4
 
+from netvoyager_database.exceptions import RepositoryConflictError
 import pytest
 
 from netvoyager_analysis.ipam.observations import PrefixObservation
@@ -143,16 +144,17 @@ def test_rollback_removes_uncommitted_candidates(storage):
         ) is None
 
 
-def test_resolution_blocked_before_canonical_prefix_persistence(
-    storage,
-):
+def test_resolution_requires_existing_canonical_prefix(storage):
     candidate = _candidate()
 
     with storage() as session:
         repo = SqlPrefixDiscoveryRepository(session)
         repo.add_candidate(candidate)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            RepositoryConflictError,
+            match="Resolved canonical prefix does not exist",
+        ):
             repo.save_candidate(
                 replace(
                     candidate,

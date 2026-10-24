@@ -1,8 +1,11 @@
 
 """Supported claims, actions, and validation requirements.
 
-Policies may only authorize capabilities explicitly supported by
+Policies may authorize only capabilities explicitly supported by
 NetVoyager. Domain-specific validation is performed separately.
+
+Administrator-defined full trust overrides ordinary claim permissions
+and requirements, not supported claim/action combinations.
 """
 
 SUPPORTED_CLAIMS = frozenset({
@@ -89,6 +92,8 @@ CLAIM_ACTIONS: dict[str, frozenset[str]] = {
     "prefix.existence": frozenset({
         "record_observation",
         "create_candidate",
+        "correlate_candidate",
+        "promote_candidate",
         "create_canonical_prefix",
     }),
     "scope.existence": frozenset({

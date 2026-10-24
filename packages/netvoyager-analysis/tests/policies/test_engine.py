@@ -25,7 +25,7 @@ def engine() -> PolicyEngine:
 
 def test_load_example_policies(engine: PolicyEngine) -> None:
     """Load all three example policies."""
-    assert len(engine.policies) == 3
+    assert len(engine.policies) == 4
 
     assert engine.get("excel_inventory", "device_inventory")
     assert engine.get("paloalto", "local_rib")
