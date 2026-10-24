@@ -1,8 +1,8 @@
 
 """Unit of Work for network inventory and intelligence persistence.
 
-Devices, discovery, evidence, and findings share one SQLAlchemy session
-and one transaction.
+Devices, discovery, prefix discovery, evidence, and findings share one
+SQLAlchemy session and one transaction.
 """
 
 from __future__ import annotations
@@ -24,11 +24,14 @@ from netvoyager_database.repositories.evidence import (
 from netvoyager_database.repositories.findings import (
     SqlFindingRepository,
 )
+from netvoyager_database.repositories.ipam.prefix_discovery import (
+    SqlPrefixDiscoveryRepository,
+)
 from netvoyager_database.unit_of_work.base import BaseUnitOfWork
 
 
 class NetworkInventoryUnitOfWork(BaseUnitOfWork):
-    """Coordinate device and intelligence repositories transactionally.
+    """Coordinate repositories transactionally.
 
     All repositories operate on the same active database session.
     Changes require an explicit commit.
@@ -45,6 +48,7 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         self._discovery: SqlDeviceDiscoveryRepository | None = None
         self._evidence: SqlEvidenceRepository | None = None
         self._findings: SqlFindingRepository | None = None
+        self._prefix_discovery: SqlPrefixDiscoveryRepository | None = None
 
     @property
     def devices(self) -> SqlNetworkDeviceRepository:
@@ -98,6 +102,19 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
 
         return self._findings
 
+    @property
+    def prefix_discovery(self) -> SqlPrefixDiscoveryRepository:
+        """Return the prefix-discovery repository for the active transaction."""
+        self._require_active()
+
+        if self._prefix_discovery is None:
+            raise TransactionError(
+                code="storage.repository_not_initialized",
+                message="The prefix-discovery repository is not initialized.",
+            )
+
+        return self._prefix_discovery
+
     def _initialize_repositories(self) -> None:
         """Initialize all repositories using the active database session."""
         session = self.session
@@ -106,3 +123,4 @@ class NetworkInventoryUnitOfWork(BaseUnitOfWork):
         self._discovery = SqlDeviceDiscoveryRepository(session)
         self._evidence = SqlEvidenceRepository(session)
         self._findings = SqlFindingRepository(session)
+        self._prefix_discovery = SqlPrefixDiscoveryRepository(session)

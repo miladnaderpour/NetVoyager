@@ -21,7 +21,7 @@ from netvoyager_network.ipam.discovery.decisions import (
 from netvoyager_database.engine import create_database_engine
 from netvoyager_database.schema import create_schema
 from netvoyager_database.session import create_session_factory
-from netvoyager_database.repositories.prefix_discovery import (
+from netvoyager_database.repositories.ipam.prefix_discovery import (
     SqlPrefixDiscoveryRepository,
 )
 
