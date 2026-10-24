@@ -1,5 +1,5 @@
 
-"""Persistence for independent prefix observations and discovery candidates."""
+"""Persistence for prefix observations and discovery candidates."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from netvoyager_database.entities.base import Base, TimestampMixin
 
 
 class PrefixObservationEntity(Base):
-    """Store one source observation without asserting canonical acceptance."""
+    """Store independent source observations and their source context."""
 
     __tablename__ = "prefix_observations"
 
@@ -33,33 +33,50 @@ class PrefixObservationEntity(Base):
     )
 
     observation_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True
+        Uuid(as_uuid=True),
+        primary_key=True,
     )
     dataset_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), nullable=False, index=True
+        Uuid(as_uuid=True),
+        nullable=False,
+        index=True,
     )
     local_ref: Mapped[str] = mapped_column(
-        String(255), nullable=False
+        String(255),
+        nullable=False,
     )
     prefix: Mapped[str] = mapped_column(
-        String(49), nullable=False
+        String(49),
+        nullable=False,
     )
     observation_kind: Mapped[str] = mapped_column(
-        String(80), nullable=False
+        String(80),
+        nullable=False,
     )
     routing_context: Mapped[str | None] = mapped_column(
-        String(255)
+        String(255),
     )
     address_space_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True)
+        Uuid(as_uuid=True),
     )
     local_device_ref: Mapped[str | None] = mapped_column(
-        String(255)
+        String(255),
+    )
+
+    # Source context is captured by the trusted ingestion adapter.
+    # Legacy records without this context cannot authorize reconciliation.
+    source_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    source_method: Mapped[str | None] = mapped_column(
+        String(80),
+        nullable=True,
     )
 
 
 class PrefixDiscoveryCandidateEntity(Base, TimestampMixin):
-    """Persist the current snapshot of a prefix discovery candidate."""
+    """Persist the current snapshot of a discovery candidate."""
 
     __tablename__ = "prefix_discovery_candidates"
 
@@ -88,33 +105,39 @@ class PrefixDiscoveryCandidateEntity(Base, TimestampMixin):
     )
 
     candidate_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True
+        Uuid(as_uuid=True),
+        primary_key=True,
     )
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False
+        String(32),
+        nullable=False,
     )
     prefix: Mapped[str | None] = mapped_column(
-        String(49)
+        String(49),
     )
     address_space_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True)
+        Uuid(as_uuid=True),
     )
     first_seen: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     last_seen: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
-
     resolved_prefix_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("network_prefixes.id"),
+        ForeignKey(
+            "network_prefixes.id",
+            name="fk_prefix_discovery_candidates_resolved_prefix_id",
+        ),
         nullable=True,
     )
 
 
 class PrefixCandidateObservationEntity(Base):
-    """Explicit association between an observation and a candidate."""
+    """Explicit observation-to-candidate association."""
 
     __tablename__ = "prefix_candidate_observations"
 

@@ -11,6 +11,7 @@ Transaction ownership belongs to the Unit of Work.
 from typing import Protocol
 from uuid import UUID
 
+from netvoyager_analysis.ipam.observations import PrefixObservation
 from netvoyager_network.ipam.discovery.decisions import (
     PrefixDiscoveryDecision,
 )
@@ -21,11 +22,34 @@ from netvoyager_network.ipam.discovery.relationships import (
     PrefixDiscoveryCandidateRelationship,
 )
 
-from netvoyager_analysis.ipam.observations import PrefixObservation
-
 
 class PrefixDiscoveryRepositoryProtocol(Protocol):
     """Provide durable access to prefix discovery state."""
+
+    def add_observation(
+        self,
+        observation: PrefixObservation,
+        dataset_id: UUID,
+        *,
+        source_name: str | None = None,
+        source_method: str | None = None,
+    ) -> None:
+        """Persist an observation with its collection source context."""
+        ...
+
+    def get_observation(
+        self,
+        observation_id: UUID,
+    ) -> PrefixObservation | None:
+        """Return an observation by identity."""
+        ...
+
+    def get_observation_source(
+        self,
+        observation_id: UUID,
+    ) -> tuple[str, str] | None:
+        """Return the observation's registered policy source and method."""
+        ...
 
     def get_candidate(
         self,
@@ -39,13 +63,10 @@ class PrefixDiscoveryRepositoryProtocol(Protocol):
         prefix: str,
         address_space_id: UUID | None = None,
     ) -> tuple[PrefixDiscoveryCandidate, ...]:
-        """Find candidates by normalized CIDR and optional address space.
+        """Find candidates by normalized CIDR.
 
-        A None address_space_id means no address-space filter.
-        It must not be interpreted as the global address space.
-
-        The matching engine determines whether a returned candidate
-        is an exact or possible match.
+        A None address_space_id disables address-space filtering.
+        It does not mean the global address space.
         """
         ...
 
@@ -53,14 +74,14 @@ class PrefixDiscoveryRepositoryProtocol(Protocol):
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        """Insert a new candidate without replacing existing identity."""
+        """Insert a new candidate."""
         ...
 
     def save_candidate(
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        """Persist an existing, already-authorized candidate snapshot."""
+        """Persist an already-authorized candidate snapshot."""
         ...
 
     def link_observation(
@@ -68,19 +89,14 @@ class PrefixDiscoveryRepositoryProtocol(Protocol):
         observation_id: UUID,
         candidate_id: UUID,
     ) -> None:
-        """Associate an existing observation with a candidate.
-
-        The association must be idempotent.
-
-        The observation remains independent of the candidate.
-        """
+        """Associate an observation with a candidate idempotently."""
         ...
 
     def candidate_observation_ids(
         self,
         candidate_id: UUID,
     ) -> tuple[UUID, ...]:
-        """Return observation references associated with a candidate."""
+        """Return observation identities associated with a candidate."""
         ...
 
     def get_relationship(
@@ -138,19 +154,4 @@ class PrefixDiscoveryRepositoryProtocol(Protocol):
         subject_id: UUID,
     ) -> tuple[PrefixDiscoveryDecision, ...]:
         """Return discovery decisions for a candidate or relationship."""
-        ...
-
-    def add_observation(
-        self,
-        observation: PrefixObservation,
-        dataset_id: UUID,
-    ) -> None:
-        """Persist an independent source observation."""
-        ...
-
-    def get_observation(
-        self,
-        observation_id: UUID,
-    ) -> PrefixObservation | None:
-        """Return an observation by identity."""
         ...

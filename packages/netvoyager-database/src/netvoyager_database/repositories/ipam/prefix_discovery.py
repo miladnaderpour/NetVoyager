@@ -28,6 +28,8 @@ from netvoyager_database.entities.ipam import (
     PrefixDiscoveryRelationshipEntity,
     PrefixDiscoveryDecisionEntity,
 )
+from netvoyager_database.entities.ipam.canonical import NetworkPrefixEntity
+
 from netvoyager_database.mappers.ipam.prefix_discovery import (
     observation_to_domain,
     observation_to_entity,
@@ -38,11 +40,6 @@ from netvoyager_database.mappers.ipam.prefix_discovery import (
     decision_to_domain,
     decision_to_entity,
 )
-
-from netvoyager_database.entities.ipam.canonical import (
-    NetworkPrefixEntity,
-)
-
 from netvoyager_database.exceptions import (
     RepositoryConflictError,
     RepositoryNotFoundError,
@@ -50,7 +47,7 @@ from netvoyager_database.exceptions import (
 
 
 class SqlPrefixDiscoveryRepository:
-    """Persist already-decided discovery changes without issuing commits."""
+    """Persist already-decided discovery changes without commits."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -68,10 +65,30 @@ class SqlPrefixDiscoveryRepository:
         self,
         observation: PrefixObservation,
         dataset_id: UUID,
+        *,
+        source_name: str | None = None,
+        source_method: str | None = None,
     ) -> None:
-        self._session.add(
-            observation_to_entity(observation, dataset_id)
-        )
+        """Persist an observation and its source profile context."""
+        if (source_name is None) != (source_method is None):
+            raise ValueError(
+                "Source name and method must be provided together"
+            )
+
+        if source_name is not None:
+            if (
+                not isinstance(source_name, str)
+                or not isinstance(source_method, str)
+                or not source_name.strip()
+                or not source_method.strip()
+            ):
+                raise ValueError("Source identifiers cannot be empty")
+
+        entity = observation_to_entity(observation, dataset_id)
+        entity.source_name = source_name
+        entity.source_method = source_method
+
+        self._session.add(entity)
         self._flush(
             "storage.prefix_observation_conflict",
             "Cannot insert prefix observation.",
@@ -85,11 +102,30 @@ class SqlPrefixDiscoveryRepository:
             PrefixObservationEntity,
             observation_id,
         )
+
         return (
             observation_to_domain(entity)
             if entity is not None
             else None
         )
+
+    def get_observation_source(
+        self,
+        observation_id: UUID,
+    ) -> tuple[str, str] | None:
+        """Read the source identity recorded during observation ingestion."""
+        entity = self._session.get(
+            PrefixObservationEntity,
+            observation_id,
+        )
+
+        if entity is None:
+            return None
+
+        if entity.source_name is None or entity.source_method is None:
+            return None
+
+        return entity.source_name, entity.source_method
 
     def get_candidate(
         self,
@@ -99,6 +135,7 @@ class SqlPrefixDiscoveryRepository:
             PrefixDiscoveryCandidateEntity,
             candidate_id,
         )
+
         return (
             candidate_to_domain(entity)
             if entity is not None
@@ -110,7 +147,7 @@ class SqlPrefixDiscoveryRepository:
         prefix: str,
         address_space_id: UUID | None = None,
     ) -> tuple[PrefixDiscoveryCandidate, ...]:
-        """None disables namespace filtering, not an alias for global."""
+        """Find candidates using the indexed normalized CIDR."""
         normalized = ip_network(
             prefix,
             strict=False,
@@ -141,7 +178,7 @@ class SqlPrefixDiscoveryRepository:
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        """Ensure a resolved candidate references a compatible prefix."""
+        """Verify that resolved candidates reference compatible prefixes."""
         if candidate.resolved_prefix_id is None:
             return
 
@@ -176,13 +213,13 @@ class SqlPrefixDiscoveryRepository:
                 code="storage.address_space_mismatch",
                 message="Candidate and canonical AddressSpaces differ.",
             )
-        
+
     def add_candidate(
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        
         self._validate_resolved_prefix(candidate)
+
         self._session.add(candidate_to_entity(candidate))
         self._flush(
             "storage.prefix_candidate_conflict",
@@ -193,8 +230,8 @@ class SqlPrefixDiscoveryRepository:
         self,
         candidate: PrefixDiscoveryCandidate,
     ) -> None:
-        
         self._validate_resolved_prefix(candidate)
+
         entity = self._session.get(
             PrefixDiscoveryCandidateEntity,
             candidate.candidate_id,
@@ -232,7 +269,7 @@ class SqlPrefixDiscoveryRepository:
         observation_id: UUID,
         candidate_id: UUID,
     ) -> None:
-        """Idempotent link; foreign keys validate both records exist."""
+        """Create an idempotent observation association."""
         key = (observation_id, candidate_id)
 
         if self._session.get(
@@ -422,8 +459,7 @@ class SqlPrefixDiscoveryRepository:
         query = (
             select(PrefixDiscoveryDecisionEntity)
             .where(
-                PrefixDiscoveryDecisionEntity.subject_id
-                == subject_id
+                PrefixDiscoveryDecisionEntity.subject_id == subject_id
             )
             .order_by(
                 PrefixDiscoveryDecisionEntity.timestamp,
