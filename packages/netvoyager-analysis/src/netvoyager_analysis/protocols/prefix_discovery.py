@@ -139,3 +139,18 @@ class PrefixDiscoveryRepositoryProtocol(Protocol):
     ) -> tuple[PrefixDiscoveryDecision, ...]:
         """Return discovery decisions for a candidate or relationship."""
         ...
+
+    def add_observation(
+        self,
+        observation: PrefixObservation,
+        dataset_id: UUID,
+    ) -> None:
+        """Persist an independent source observation."""
+        ...
+
+    def get_observation(
+        self,
+        observation_id: UUID,
+    ) -> PrefixObservation | None:
+        """Return an observation by identity."""
+        ...
