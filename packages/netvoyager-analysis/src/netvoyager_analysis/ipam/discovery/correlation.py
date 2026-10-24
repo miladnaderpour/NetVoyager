@@ -1,8 +1,8 @@
 
 """Pure, non-destructive correlation of prefix discovery candidates.
 
-Correlation only proposes possible identity relationships.
-It never confirms, rejects, merges, resolves, or promotes candidates.
+Only candidates with the same normalized CIDR are compared. Correlation
+proposes relationships; it never changes identities or lifecycle states.
 """
 
 from collections.abc import Iterable
@@ -30,35 +30,37 @@ def correlate_prefix_candidates(
         PrefixDiscoveryCandidateRelationship
     ] = (),
 ) -> PrefixCorrelationResult:
-    """Propose possible relationships between compatible prefix candidates.
+    """Propose compatible candidate relationships, grouped by exact CIDR.
 
-    Rules:
-    - Different CIDRs do not establish identity.
-    - Different known address spaces are incompatible.
-    - Equal CIDRs with unresolved space may be correlated provisionally.
-    - Existing relationships, including rejected ones, are authoritative
-      for this planning operation and are never overwritten.
-    - No candidate or relationship state is mutated.
+    Different known address spaces never correlate. Missing address-space
+    information may yield a possible relationship. Existing relationships,
+    including rejected relationships, always suppress a new proposal.
     """
     unique: dict[UUID, PrefixDiscoveryCandidate] = {}
 
     for candidate in candidates:
-        existing = unique.get(candidate.candidate_id)
-        if existing is not None and existing != candidate:
+        previous = unique.get(candidate.candidate_id)
+
+        if previous is not None and previous != candidate:
             raise ValueError(
                 "Conflicting snapshots for the same candidate ID"
             )
+
         unique[candidate.candidate_id] = candidate
 
-    eligible = sorted(
-        (
-            candidate
-            for candidate in unique.values()
-            if candidate.status not in {"rejected", "retired"}
-            and candidate.prefix is not None
-        ),
-        key=lambda candidate: candidate.candidate_id,
-    )
+    by_prefix: dict[str, list[PrefixDiscoveryCandidate]] = {}
+
+    for candidate in unique.values():
+        if (
+            candidate.status in {"rejected", "retired"}
+            or candidate.prefix is None
+        ):
+            continue
+
+        by_prefix.setdefault(
+            candidate.prefix.with_prefixlen,
+            [],
+        ).append(candidate)
 
     known_relationships = {
         relationship.relationship_id
@@ -67,28 +69,41 @@ def correlate_prefix_candidates(
 
     proposed: list[PrefixDiscoveryCandidateRelationship] = []
 
-    for index, left in enumerate(eligible):
-        for right in eligible[index + 1:]:
-            if left.prefix != right.prefix:
-                continue
+    for prefix in sorted(by_prefix):
+        group = sorted(
+            by_prefix[prefix],
+            key=lambda item: item.candidate_id,
+        )
 
-            if (
-                left.address_space_id is not None
-                and right.address_space_id is not None
-                and left.address_space_id != right.address_space_id
-            ):
-                continue
+        for index, left in enumerate(group):
+            for right in group[index + 1:]:
+                if (
+                    left.address_space_id is not None
+                    and right.address_space_id is not None
+                    and left.address_space_id != right.address_space_id
+                ):
+                    continue
 
-            relationship = PrefixDiscoveryCandidateRelationship(
-                candidate_a_id=left.candidate_id,
-                candidate_b_id=right.candidate_id,
-                status="possible",
-            )
+                relationship = PrefixDiscoveryCandidateRelationship(
+                    candidate_a_id=left.candidate_id,
+                    candidate_b_id=right.candidate_id,
+                    status="possible",
+                )
 
-            if relationship.relationship_id in known_relationships:
-                continue
+                if relationship.relationship_id in known_relationships:
+                    continue
 
-            known_relationships.add(relationship.relationship_id)
-            proposed.append(relationship)
+                known_relationships.add(relationship.relationship_id)
+                proposed.append(relationship)
 
-    return PrefixCorrelationResult(proposed=tuple(proposed))
+    # Preserve the former global candidate-ID ordering across CIDR groups.
+    proposed.sort(
+        key=lambda item: (
+            item.candidate_a_id,
+            item.candidate_b_id,
+        )
+    )
+
+    return PrefixCorrelationResult(
+        proposed=tuple(proposed),
+    )
