@@ -134,11 +134,18 @@ class SqlDeviceDiscoveryRepository:
         self,
         candidate: DeviceDiscoveryCandidate,
     ) -> None:
-        """Update an existing candidate with its supplied snapshot."""
+        """Persist an already-reconciled discovery candidate snapshot.
+
+        The calling Analysis service is responsible for determining
+        permitted attribute updates and recording attribute conflicts.
+
+        This repository performs no reconciliation or policy decisions.
+        """
         entity = self._session.get(
             DeviceDiscoveryCandidateEntity,
             candidate.candidate_id,
         )
+
         if entity is None:
             raise RepositoryNotFoundError(
                 code="storage.discovery_candidate_not_found",
@@ -148,11 +155,23 @@ class SqlDeviceDiscoveryRepository:
 
         updated = candidate_to_entity(candidate)
 
+        # Discovery identity and lifecycle
         entity.status = updated.status
         entity.name = updated.name
         entity.host_name = updated.host_name
         entity.serial_number = updated.serial_number
         entity.management_ip = updated.management_ip
+
+        # Reported inventory attributes
+        entity.site = updated.site
+        entity.role = updated.role
+        entity.primary_ipv4 = updated.primary_ipv4
+        entity.manufacturer = updated.manufacturer
+        entity.model = updated.model
+        entity.software_version = updated.software_version
+        entity.asset_tag = updated.asset_tag
+
+        # Discovery timestamps and canonical resolution
         entity.first_seen = updated.first_seen
         entity.last_seen = updated.last_seen
         entity.resolved_device_id = updated.resolved_device_id

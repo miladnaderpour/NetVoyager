@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from netvoyager_import.inventory.excel import read_network_devices
+from netvoyager_import.inventory.excel import read_excel_inventory
 
 
 def create_inventory(
@@ -49,7 +49,7 @@ def test_unique_names_remain_unchanged(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert [item.name for item in result.observations] == [
         "SW01",
@@ -68,7 +68,7 @@ def test_duplicate_names_receive_row_prefix(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert [item.name for item in result.observations] == [
         "DUP-2-SW01",
@@ -91,7 +91,7 @@ def test_duplicate_names_are_case_insensitive(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert [item.name for item in result.observations] == [
         "DUP-2-SW01",
@@ -109,7 +109,7 @@ def test_generated_name_collision_is_resolved(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert [item.name for item in result.observations] == [
         "DUP-2-SW01-2",
@@ -127,7 +127,7 @@ def test_duplicate_name_warn_preserves_names(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(
+    result = read_excel_inventory(
         path,
         duplicate_name_policy="warn",
     )
@@ -150,7 +150,7 @@ def test_duplicate_name_error_raises(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="Duplicate device name"):
-        read_network_devices(
+        read_excel_inventory(
             path,
             duplicate_name_policy="error",
         )
@@ -165,7 +165,7 @@ def test_duplicate_serial_warns_without_renaming(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert [item.name for item in result.observations] == [
         "SW01",
@@ -188,7 +188,7 @@ def test_duplicate_serial_error_raises(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="Duplicate serial number"):
-        read_network_devices(
+        read_excel_inventory(
             path,
             duplicate_serial_policy="error",
         )
@@ -205,7 +205,7 @@ def test_placeholder_serials_are_ignored(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     assert not any(
         "Duplicate serial number" in issue.reason
@@ -222,7 +222,7 @@ def test_original_inventory_line_is_preserved(tmp_path: Path):
         ],
     )
 
-    result = read_network_devices(path)
+    result = read_excel_inventory(path)
 
     observation = result.observations[0]
 
@@ -235,7 +235,7 @@ def test_invalid_policy_is_rejected(tmp_path: Path):
     path = tmp_path / "inventory.xlsx"
 
     with pytest.raises(ValueError, match="Invalid duplicate name policy"):
-        read_network_devices(
+        read_excel_inventory(
             path,
             duplicate_name_policy="invalid",
         )

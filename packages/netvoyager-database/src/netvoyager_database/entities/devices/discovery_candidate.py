@@ -27,6 +27,9 @@ class DeviceDiscoveryCandidateEntity(Base, TimestampMixin):
     This entity stores the current candidate snapshot. Supporting
     evidence, relationships, and decision history are persisted
     independently.
+
+    Inventory attributes are source-reported and do not establish
+    canonical device facts or authoritative site membership.
     """
 
     __tablename__ = "device_discovery_candidates"
@@ -65,6 +68,7 @@ class DeviceDiscoveryCandidateEntity(Base, TimestampMixin):
         default="candidate",
     )
 
+    # Reported device identifiers
     name: Mapped[str | None] = mapped_column(String(255))
     host_name: Mapped[str | None] = mapped_column(String(255))
 
@@ -78,6 +82,43 @@ class DeviceDiscoveryCandidateEntity(Base, TimestampMixin):
         index=True,
     )
 
+    # Reported inventory attributes
+    site: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    role: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    primary_ipv4: Mapped[str | None] = mapped_column(
+        String(45),
+        nullable=True,
+    )
+
+    manufacturer: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    model: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    software_version: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    asset_tag: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    # Discovery lifecycle
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

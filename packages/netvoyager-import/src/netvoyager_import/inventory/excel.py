@@ -1,29 +1,55 @@
 
-"""Import device observations from an Excel inventory.
+"""Import normalized device observations from an Excel inventory.
 
-Read inventory rows into source observations without creating NetworkDevice
-objects. Validate required values and report source-data inconsistencies.
+Excel inventory rows are parsed and validated independently of canonical
+network device identity.
 
-Duplicate device names can be resolved using deterministic Excel row prefixes.
-Duplicate serial numbers are reported according to the selected policy.
+The importer provides two public entry points:
 
-Original inventory values are preserved for evidence and troubleshooting.
+- read_excel_inventory(): detailed parsed inventory and validation issues.
+- read_network_devices(): normalized SourceDataset for device discovery.
+
+The importer does not create canonical devices, resolve identities, or make
+authorization decisions. Those responsibilities belong to Analysis.
 """
+
+from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from ipaddress import IPv4Address
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, TypeAlias
+from uuid import NAMESPACE_URL, uuid5
 
 from openpyxl import load_workbook
+
+from netvoyager_analysis.devices.observations import DeviceObservation
+from netvoyager_analysis.sources.models import Source, SourceDataset
 
 
 logger = logging.getLogger("netvoyager.import.inventory.excel")
 
+
+# ---------------------------------------------------------------------------
+# Source identity
+# ---------------------------------------------------------------------------
+
+EXCEL_SOURCE_NAME = "excel_inventory"
+EXCEL_SOURCE_TYPE = "device_inventory"
+
+EXCEL_SOURCE_ID = uuid5(
+    NAMESPACE_URL,
+    "netvoyager:source:excel_inventory",
+)
+
+
+# ---------------------------------------------------------------------------
+# Excel column definitions
+# ---------------------------------------------------------------------------
 
 NAME_COLUMN = "name"
 HOST_NAME_COLUMN = "host_name"
@@ -38,6 +64,7 @@ MODEL_COLUMN = "model"
 SERIAL_NUMBER_COLUMN = "serial_number"
 ASSET_TAG_COLUMN = "asset_tag"
 SOFTWARE_VERSION_COLUMN = "software_version"
+
 STATUS_COLUMN = "status"
 VALIDATION_STATUS_COLUMN = "validation_status"
 
@@ -67,19 +94,17 @@ UNKNOWN_SERIAL_VALUES = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# Excel parsing models
+# ---------------------------------------------------------------------------
+
 @dataclass(frozen=True, slots=True)
 class ExcelDeviceObservation:
-    """Device information observed in one Excel inventory row.
+    """Device attributes reported by an individual Excel inventory row.
 
-    The observation represents imported source data rather than a resolved
-    NetworkDevice. It does not contain a persistent device identity.
+    This is an intermediate import representation, not a canonical device.
 
-    The name may be modified by the configured duplicate-name policy to
-    provide a unique imported name. The original name remains available
-    in raw_line.
-
-    Missing values are preserved as None so downstream analysis can decide
-    whether an observation is sufficient to create a device.
+    Original source values are retained for validation and diagnostics.
     """
 
     name: str | None = None
@@ -95,8 +120,8 @@ class ExcelDeviceObservation:
     serial_number: str | None = None
     asset_tag: str | None = None
     software_version: str | None = None
-    status: str | None = None
 
+    status: str | None = None
     validation_status: str | None = None
 
     line_number: int | None = None
@@ -105,7 +130,7 @@ class ExcelDeviceObservation:
 
 @dataclass(frozen=True, slots=True)
 class InventoryIssue:
-    """An issue detected while reading an Excel inventory row."""
+    """A validation or consistency issue in the Excel inventory."""
 
     row_number: int
     reason: str
@@ -113,12 +138,12 @@ class InventoryIssue:
 
 @dataclass(frozen=True, slots=True)
 class InventoryReadResult:
-    """Inventory observations, validation issues, and management IP mappings.
+    """Detailed result of Excel inventory parsing.
 
-    Observations preserve source row order and are never merged.
+    Observations preserve source-row order and are never merged.
 
-    The IP-to-site mapping contains every site associated with each
-    management address, including addresses shared by multiple devices.
+    Management IP mappings retain every site reporting an address,
+    including conflicting and duplicated addresses.
     """
 
     observations: tuple[ExcelDeviceObservation, ...]
@@ -126,21 +151,25 @@ class InventoryReadResult:
     ip_sites_mapping: Mapping[IPv4Address, frozenset[str]]
 
 
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
+
 def _text(value: Any) -> str | None:
-    """Convert a source value to stripped text or None."""
+    """Normalize an Excel cell to stripped text or None."""
     if value is None:
         return None
 
-    text = str(value).strip()
-    return text or None
+    result = str(value).strip()
+    return result or None
 
 
 def _cell(
     row: tuple[Any, ...],
-    columns: dict[str, int],
+    columns: Mapping[str, int],
     column_name: str,
 ) -> Any:
-    """Return a column value or None when the column is unavailable."""
+    """Read a named column, returning None when unavailable."""
     index = columns.get(column_name)
 
     if index is None or index >= len(row):
@@ -157,7 +186,7 @@ def _ipv4(
     issues: list[InventoryIssue],
     required: bool = False,
 ) -> IPv4Address | None:
-    """Parse an IPv4 address and report missing or invalid values."""
+    """Parse an IPv4 address without discarding an invalid source row."""
     text = _text(value)
 
     if text is None:
@@ -168,7 +197,6 @@ def _ipv4(
                     reason=f"Missing {field_name}",
                 )
             )
-
         return None
 
     try:
@@ -180,7 +208,6 @@ def _ipv4(
                 reason=f"Invalid {field_name}",
             )
         )
-
         return None
 
 
@@ -188,27 +215,21 @@ def _raw_line(
     row: tuple[Any, ...],
     header: tuple[Any, ...],
 ) -> str:
-    """Serialize populated source cells for evidence and troubleshooting."""
+    """Serialize populated source cells for diagnostics and provenance."""
     values: list[str] = []
 
     for column_name, value in zip(header, row):
         name = _text(column_name)
         text = _text(value)
 
-        if name is None or text is None:
-            continue
-
-        values.append(f"{name}={text}")
+        if name is not None and text is not None:
+            values.append(f"{name}={text}")
 
     return " | ".join(values)
 
 
 def _duplicate_key(value: str | None) -> str | None:
-    """Normalize a value for case-insensitive duplicate detection.
-
-    Surrounding whitespace is ignored. Missing and whitespace-only
-    values do not participate in duplicate detection.
-    """
+    """Normalize a device identifier for case-insensitive comparison."""
     if value is None:
         return None
 
@@ -216,11 +237,7 @@ def _duplicate_key(value: str | None) -> str | None:
 
 
 def _serial_key(value: str | None) -> str | None:
-    """Return a normalized serial number excluding known placeholders.
-
-    Serial numbers are compared case-insensitively without changing
-    their original values in imported observations.
-    """
+    """Normalize a serial number while excluding placeholder values."""
     key = _duplicate_key(value)
 
     if key is None or key in UNKNOWN_SERIAL_VALUES:
@@ -228,6 +245,24 @@ def _serial_key(value: str | None) -> str | None:
 
     return key
 
+
+def _normalize_filter(
+    values: Collection[str] | None,
+) -> frozenset[str] | None:
+    """Normalize an optional site/device selection filter."""
+    if values is None:
+        return None
+
+    return frozenset(
+        normalized
+        for value in values
+        if (normalized := _duplicate_key(value)) is not None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Duplicate handling
+# ---------------------------------------------------------------------------
 
 def _resolve_duplicate_observations(
     observations: list[ExcelDeviceObservation],
@@ -238,19 +273,13 @@ def _resolve_duplicate_observations(
 ) -> list[ExcelDeviceObservation]:
     """Apply duplicate-name and duplicate-serial policies.
 
-    Duplicate names are identified across the complete inventory using
-    case-insensitive comparison.
+    Duplicate names are checked across the complete workbook.
 
-    Under the prefix policy, every occurrence of a duplicated name
-    receives the deterministic format DUP-{row_number}-{original_name}.
+    Under the prefix policy, duplicated names receive deterministic
+    DUP-row-name identifiers.
 
-    Generated names are checked against original inventory names and
-    previously generated names. Numeric suffixes resolve any collisions.
-
-    Duplicate serial numbers are reported or rejected according to the
-    selected policy. They never cause records to be renamed or merged.
-
-    Original source values remain available in raw_line.
+    Duplicate serials produce warnings or errors according to policy.
+    No records are merged or silently discarded.
     """
     name_counts = Counter(
         key
@@ -264,7 +293,7 @@ def _resolve_duplicate_observations(
         if (key := _serial_key(observation.serial_number)) is not None
     )
 
-    reserved_names: set[str] = {
+    reserved_names = {
         key
         for observation in observations
         if (key := _duplicate_key(observation.name)) is not None
@@ -285,6 +314,7 @@ def _resolve_duplicate_observations(
 
         resolved = observation
 
+        # Duplicate device names
         if name_key is not None and name_counts[name_key] > 1:
             if duplicate_name_policy == "error":
                 raise ValueError(
@@ -296,30 +326,27 @@ def _resolve_duplicate_observations(
                 issues.append(
                     InventoryIssue(
                         row_number=row_number,
-                        reason=(
-                            f"Duplicate device name: {observation.name}"
-                        ),
+                        reason=f"Duplicate device name: {observation.name}",
                     )
                 )
 
             if duplicate_name_policy == "prefix":
-                candidate = f"DUP-{row_number}-{observation.name}"
-                generated_name = candidate
+                base_name = f"DUP-{row_number}-{observation.name}"
+                generated_name = base_name
                 suffix = 2
 
                 while generated_name.strip().casefold() in reserved_names:
-                    generated_name = f"{candidate}-{suffix}"
+                    generated_name = f"{base_name}-{suffix}"
                     suffix += 1
 
-                reserved_names.add(
-                    generated_name.strip().casefold()
-                )
+                reserved_names.add(generated_name.strip().casefold())
 
                 resolved = replace(
                     observation,
                     name=generated_name,
                 )
 
+        # Duplicate serial numbers
         if serial_key is not None and serial_counts[serial_key] > 1:
             if duplicate_serial_policy == "error":
                 raise ValueError(
@@ -343,19 +370,19 @@ def _resolve_duplicate_observations(
     return resolved_observations
 
 
+# ---------------------------------------------------------------------------
+# Excel row parsing
+# ---------------------------------------------------------------------------
+
 def _observation_from_row(
     row: tuple[Any, ...],
     *,
     row_number: int,
     header: tuple[Any, ...],
-    columns: dict[str, int],
+    columns: Mapping[str, int],
     issues: list[InventoryIssue],
 ) -> ExcelDeviceObservation:
-    """Create one device observation from an Excel inventory row.
-
-    Missing required values and invalid IPv4 addresses are reported
-    without discarding the source observation.
-    """
+    """Parse a single workbook row into an ExcelDeviceObservation."""
     name = _text(_cell(row, columns, NAME_COLUMN))
 
     if name is None:
@@ -414,52 +441,39 @@ def _observation_from_row(
     )
 
 
-def read_network_devices(
+# ---------------------------------------------------------------------------
+# Detailed Excel inventory reader
+# ---------------------------------------------------------------------------
+
+def read_excel_inventory(
     path: Path,
     sheet_name: str | None = None,
     *,
     duplicate_name_policy: DuplicateNamePolicy = "prefix",
     duplicate_serial_policy: DuplicateSerialPolicy = "warn",
 ) -> InventoryReadResult:
-    """Read device observations with configurable duplicate handling.
+    """Read and validate Excel inventory without canonical reconciliation.
 
-    Parse the inventory while preserving source row order and reporting
-    missing values, invalid addresses, and conflicting management IP sites.
+    This function retains the original detailed parsing contract.
 
-    Duplicate-name policies:
-        prefix: Report duplicates and generate unique DUP-row-name values.
-        warn:   Report duplicates without modifying names.
-        error:  Raise ValueError on a duplicate name.
-        ignore: Preserve names without duplicate-name issues.
+    It returns:
+        - ExcelDeviceObservation records
+        - InventoryIssue records
+        - Management IP-to-site mappings
 
-    Duplicate-serial policies:
-        warn:   Report duplicate non-placeholder serial numbers.
-        error:  Raise ValueError on duplicate serial numbers.
-        ignore: Preserve serial numbers without duplicate-serial issues.
+    All non-empty rows are retained, including rows with invalid fields.
 
-    Duplicate checks are case-insensitive. Empty names and known serial
-    placeholders are excluded from their respective duplicate checks.
-
-    The original source values remain available in raw_line. Observations
-    are never merged or discarded because of duplicate values.
-
-    Raise ValueError for invalid policies, missing required columns,
-    missing inventory sheets, or empty workbooks.
+    Duplicate checks apply to the complete workbook, not a filtered subset.
     """
     if duplicate_name_policy not in {
-        "prefix",
-        "warn",
-        "error",
-        "ignore",
+        "prefix", "warn", "error", "ignore"
     }:
         raise ValueError(
             f"Invalid duplicate name policy: {duplicate_name_policy}"
         )
 
     if duplicate_serial_policy not in {
-        "warn",
-        "error",
-        "ignore",
+        "warn", "error", "ignore"
     }:
         raise ValueError(
             f"Invalid duplicate serial policy: {duplicate_serial_policy}"
@@ -482,7 +496,6 @@ def read_network_devices(
             raise ValueError("Missing inventory sheet")
 
         rows = sheet.iter_rows(values_only=True)
-
         header = next(rows, None)
 
         if header is None:
@@ -566,7 +579,7 @@ def read_network_devices(
         )
 
         logger.info(
-            "Network device inventory read",
+            "Excel inventory parsed",
             extra={
                 "observation_count": len(result.observations),
                 "issue_count": len(result.issues),
@@ -578,3 +591,187 @@ def read_network_devices(
 
     finally:
         workbook.close()
+
+
+# ---------------------------------------------------------------------------
+# SourceDataset normalization
+# ---------------------------------------------------------------------------
+
+def _to_device_observation(
+    row: ExcelDeviceObservation,
+    *,
+    sheet_name: str | None,
+) -> DeviceObservation:
+    """Convert an Excel row into a normalized DeviceObservation.
+
+    Source-reported attributes are preserved without asserting canonical
+    identity or applying field-level reconciliation policy.
+    """
+    if row.line_number is None:
+        raise ValueError(
+            "Excel observation is missing its source row number"
+        )
+
+    sheet_ref = sheet_name or "<active>"
+
+    return DeviceObservation(
+        local_ref=f"excel:{sheet_ref}:row:{row.line_number}",
+        inventory_name=row.name,
+        hostname=row.host_name,
+        serial_number=row.serial_number,
+        asset_tag=row.asset_tag,
+        management_ip=(
+            str(row.management_ip)
+            if row.management_ip is not None
+            else None
+        ),
+        primary_ipv4=(
+            str(row.primary_IPv4)
+            if row.primary_IPv4 is not None
+            else None
+        ),
+        manufacturer=row.manufacturer,
+        model=row.model,
+        software_version=row.software_version,
+        role=row.role,
+        site=row.site,
+        status=row.status,
+        validation_status=row.validation_status,
+    )
+
+
+def _selected(
+    row: ExcelDeviceObservation,
+    *,
+    sites: frozenset[str] | None,
+    devices: frozenset[str] | None,
+) -> bool:
+    """Check optional site and device filters.
+
+    When both filters are supplied, both must match.
+    Device selection supports inventory name, hostname and serial.
+    """
+    if sites is not None:
+        site_key = _duplicate_key(row.site)
+
+        if site_key not in sites:
+            return False
+
+    if devices is not None:
+        identifiers = {
+            key
+            for value in (
+                row.name,
+                row.host_name,
+                row.serial_number,
+            )
+            if (key := _duplicate_key(value)) is not None
+        }
+
+        if not identifiers.intersection(devices):
+            return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Public normalized importer
+# ---------------------------------------------------------------------------
+
+def read_network_devices(
+    path: Path,
+    sheet_name: str | None = None,
+    *,
+    duplicate_name_policy: DuplicateNamePolicy = "prefix",
+    duplicate_serial_policy: DuplicateSerialPolicy = "warn",
+    sites: Collection[str] | None = None,
+    devices: Collection[str] | None = None,
+) -> SourceDataset:
+    """Import Excel device inventory into a normalized SourceDataset.
+
+    The entire workbook is parsed and validated before filters are applied.
+
+    Args:
+        path:
+            Excel workbook path.
+
+        sheet_name:
+            Optional worksheet name. Defaults to the active worksheet.
+
+        duplicate_name_policy:
+            Handling of duplicated device inventory names.
+
+        duplicate_serial_policy:
+            Handling of duplicated non-placeholder serial numbers.
+
+        sites:
+            Optional site selection. Matching is case-insensitive.
+
+        devices:
+            Optional device selection by inventory name, hostname or serial.
+
+    Returns:
+        SourceDataset containing independently normalized device observations.
+
+    Notes:
+        - No canonical NetworkDevice objects are created.
+        - No device identity decisions are made.
+        - No SQL persistence is performed.
+        - Filtering does not bypass workbook-wide duplicate validation.
+        - Source identity is stable across repeated imports.
+        - Each import receives independent observation and dataset UUIDs.
+    """
+    inventory = read_excel_inventory(
+        path,
+        sheet_name=sheet_name,
+        duplicate_name_policy=duplicate_name_policy,
+        duplicate_serial_policy=duplicate_serial_policy,
+    )
+
+    selected_sites = _normalize_filter(sites)
+    selected_devices = _normalize_filter(devices)
+
+    observations = tuple(
+        _to_device_observation(
+            row,
+            sheet_name=sheet_name,
+        )
+        for row in inventory.observations
+        if _selected(
+            row,
+            sites=selected_sites,
+            devices=selected_devices,
+        )
+    )
+
+    dataset = SourceDataset(
+        source=Source(
+            name=EXCEL_SOURCE_NAME,
+            source_type=EXCEL_SOURCE_TYPE,
+            source_id=EXCEL_SOURCE_ID,
+        ),
+        devices=observations,
+    )
+
+    logger.info(
+        "Excel inventory normalized into SourceDataset",
+        extra={
+            "source_id": str(EXCEL_SOURCE_ID),
+            "dataset_id": str(dataset.dataset_id),
+            "total_inventory_rows": len(inventory.observations),
+            "selected_observations": len(dataset.devices),
+            "validation_issues": len(inventory.issues),
+            "selected_site_count": (
+                len(selected_sites)
+                if selected_sites is not None
+                else None
+            ),
+            "selected_device_count": (
+                len(selected_devices)
+                if selected_devices is not None
+                else None
+            ),
+        },
+    )
+
+    return dataset

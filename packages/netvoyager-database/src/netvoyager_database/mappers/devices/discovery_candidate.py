@@ -42,7 +42,11 @@ def _candidate_status(value: str) -> DeviceDiscoveryCandidateStatus:
 def candidate_to_entity(
     candidate: DeviceDiscoveryCandidate,
 ) -> DeviceDiscoveryCandidateEntity:
-    """Convert a discovery candidate into a persistence entity."""
+    """Convert a discovery candidate into a persistence entity.
+
+    Preserve candidate UUID, lifecycle, reported inventory attributes,
+    discovery timestamps, and authorized canonical resolution.
+    """
     return DeviceDiscoveryCandidateEntity(
         candidate_id=candidate.candidate_id,
         status=candidate.status,
@@ -54,6 +58,17 @@ def candidate_to_entity(
             if candidate.management_ip is not None
             else None
         ),
+        site=candidate.site,
+        role=candidate.role,
+        primary_ipv4=(
+            str(candidate.primary_ipv4)
+            if candidate.primary_ipv4 is not None
+            else None
+        ),
+        manufacturer=candidate.manufacturer,
+        model=candidate.model,
+        software_version=candidate.software_version,
+        asset_tag=candidate.asset_tag,
         first_seen=_as_utc(candidate.first_seen),
         last_seen=_as_utc(candidate.last_seen),
         resolved_device_id=candidate.resolved_device_id,
@@ -63,7 +78,11 @@ def candidate_to_entity(
 def candidate_to_domain(
     entity: DeviceDiscoveryCandidateEntity,
 ) -> DeviceDiscoveryCandidate:
-    """Reconstruct an immutable discovery candidate from persistence."""
+    """Reconstruct an immutable candidate from SQL persistence.
+
+    Reported inventory attributes remain provisional even when a
+    candidate has been resolved to an existing canonical device.
+    """
     return DeviceDiscoveryCandidate(
         candidate_id=entity.candidate_id,
         status=_candidate_status(entity.status),
@@ -75,6 +94,17 @@ def candidate_to_domain(
             if entity.management_ip is not None
             else None
         ),
+        site=entity.site,
+        role=entity.role,
+        primary_ipv4=(
+            IPv4Address(entity.primary_ipv4)
+            if entity.primary_ipv4 is not None
+            else None
+        ),
+        manufacturer=entity.manufacturer,
+        model=entity.model,
+        software_version=entity.software_version,
+        asset_tag=entity.asset_tag,
         first_seen=_as_utc(entity.first_seen),
         last_seen=_as_utc(entity.last_seen),
         resolved_device_id=entity.resolved_device_id,
