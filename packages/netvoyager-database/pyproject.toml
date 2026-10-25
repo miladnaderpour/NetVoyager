@@ -1,23 +1,19 @@
-
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "netvoyager-database"
 version = "0.1.0"
-description = "SQL persistence infrastructure for NetVoyager"
+description = "Isolated unified inventory domain/database experiment"
 requires-python = ">=3.11"
-dependencies = [
-    "netvoyager-core>=0.1.0",
-    "netvoyager-network>=0.1.0",
-    "netvoyager-intelligence>=0.1.0",
-    "SQLAlchemy>=2.0,<2.1",
-    "alembic>=1.13,<2",
-]
+dependencies = ["SQLAlchemy>=2.0,<3", "alembic>=1.13,<2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"netvoyager_database.migrations" = ["*.mako"]
+"netvoyager_database.migrations" = ["script.py.mako", "versions/*.py"]

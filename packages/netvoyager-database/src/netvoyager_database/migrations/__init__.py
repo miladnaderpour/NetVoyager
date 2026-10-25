@@ -1,2 +1,1 @@
-
-"""Package-owned database migration infrastructure."""
+"""Alembic migration resources."""
