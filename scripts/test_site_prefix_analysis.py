@@ -8,7 +8,7 @@ from pathlib import Path
 from ipaddress import IPv4Network
 
 from netvoyager_analysis.bgp.processing import process_bgp_routes
-from netvoyager_analysis.devices.processing import process_device_observations
+from netvoyager_analysis.devices.legacy_processing import process_device_observations
 from netvoyager_analysis.devices.scopes import build_site_scopes
 from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_analysis.findings.adapters import add_inventory_issues

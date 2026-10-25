@@ -23,7 +23,6 @@ from netvoyager_database.exceptions import (
     RepositoryConflictError,
     RepositoryNotFoundError,
 )
-
 from netvoyager_database.entities.devices.network_device import (
     NetworkDeviceEntity,
 )
@@ -39,93 +38,109 @@ logger = get_logger(__name__)
 class SqlNetworkDeviceRepository:
     """Persist and retrieve canonical network devices using SQLAlchemy.
 
-    The repository operates within a caller-owned Session.
-
-    Query methods return detached domain objects. Changes must be
-    persisted explicitly through add() or save().
+    Query methods reconstruct domain objects.
 
     Write operations flush pending SQL but never commit or roll back
-    the caller's transaction.
+    the caller-owned transaction.
     """
 
     def __init__(self, session: Session) -> None:
-        """Initialize the repository with a transaction-scoped session."""
+        """Initialize with a transaction-scoped session."""
         self._session = session
 
     def get_by_id(
         self,
         device_id: UUID,
     ) -> NetworkDevice | None:
-        """Return a canonical device by its UUID, if present."""
-        entity = self._session.get(NetworkDeviceEntity, device_id)
-
+        """Return a canonical device by UUID."""
+        entity = self._session.get(
+            NetworkDeviceEntity,
+            device_id,
+        )
         return to_domain(entity) if entity is not None else None
 
     def find_by_name(
         self,
         name: str,
     ) -> NetworkDevice | None:
-        """Return a canonical device by its unique name, if present."""
+        """Return a canonical device by its unique name."""
         statement = select(NetworkDeviceEntity).where(
             NetworkDeviceEntity.name == name
         )
 
         entity = self._session.scalar(statement)
-
         return to_domain(entity) if entity is not None else None
 
     def find_by_serial(
         self,
         serial_number: str,
     ) -> tuple[NetworkDevice, ...]:
-        """Return all devices matching the exact stored serial number."""
+        """Return all devices with the exact stored serial."""
         statement = (
             select(NetworkDeviceEntity)
-            .where(NetworkDeviceEntity.serial_number == serial_number)
+            .where(
+                NetworkDeviceEntity.serial_number == serial_number
+            )
             .order_by(NetworkDeviceEntity.name)
         )
+        return self._find_many(statement)
 
+    def find_by_serial_suffix(
+        self,
+        serial_number: str,
+    ) -> tuple[NetworkDevice, ...]:
+        """Find canonical devices whose serial ends with the suffix.
+
+        Results are lookup candidates only. Analysis must validate
+        serial identity, including allowed leading-zero differences.
+        """
+        statement = (
+            select(NetworkDeviceEntity)
+            .where(
+                NetworkDeviceEntity.serial_number.endswith(
+                    serial_number,
+                    autoescape=True,
+                )
+            )
+            .order_by(NetworkDeviceEntity.name)
+        )
         return self._find_many(statement)
 
     def find_by_management_ip(
         self,
         management_ip: IPv4Address,
     ) -> tuple[NetworkDevice, ...]:
-        """Return all devices matching the management IPv4 address."""
+        """Return all devices with the management IPv4 address."""
         statement = (
             select(NetworkDeviceEntity)
-            .where(NetworkDeviceEntity.management_ip == str(management_ip))
+            .where(
+                NetworkDeviceEntity.management_ip
+                == str(management_ip)
+            )
             .order_by(NetworkDeviceEntity.name)
         )
-
         return self._find_many(statement)
 
     def find_by_asset_tag(
         self,
         asset_tag: str,
     ) -> tuple[NetworkDevice, ...]:
-        """Return all devices matching the exact stored asset tag."""
+        """Return all devices with the exact stored asset tag."""
         statement = (
             select(NetworkDeviceEntity)
-            .where(NetworkDeviceEntity.asset_tag == asset_tag)
+            .where(
+                NetworkDeviceEntity.asset_tag == asset_tag
+            )
             .order_by(NetworkDeviceEntity.name)
         )
-
         return self._find_many(statement)
 
     def add(
         self,
         device: NetworkDevice,
     ) -> None:
-        """Insert a new canonical device without replacing existing data.
-
-        An existing canonical identity raises RepositoryConflictError.
-
-        Flush detects database constraint violations before the caller
-        attempts to commit the Unit of Work.
-        """
+        """Insert a new canonical device without replacing existing data."""
         entity = to_entity(device)
-
         self._session.add(entity)
 
         try:
@@ -152,11 +167,9 @@ class SqlNetworkDeviceRepository:
         self,
         device: NetworkDevice,
     ) -> None:
-        """Persist the current state of an existing canonical device.
+        """Persist an existing canonical device snapshot.
 
-        The canonical identity must already exist. This operation
-        does not perform an implicit insert or authorize lifecycle
-        changes such as hardware replacement.
+        This operation does not authorize identity or lifecycle changes.
         """
         entity = self._session.get(
             NetworkDeviceEntity,
@@ -201,7 +214,6 @@ class SqlNetworkDeviceRepository:
         entity.software_version = updated.software_version
         entity.integration_metadata = updated.integration_metadata
 
-
         try:
             self._session.flush()
         except IntegrityError as exc:
@@ -227,7 +239,6 @@ class SqlNetworkDeviceRepository:
         self,
         statement,
     ) -> tuple[NetworkDevice, ...]:
-        """Return reconstructed domain devices for a SQL query."""
+        """Return domain objects for a SQL query."""
         entities = self._session.scalars(statement).all()
-
         return tuple(to_domain(entity) for entity in entities)

@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from netvoyager_analysis.devices.processing import process_device_observations
+from netvoyager_analysis.devices.legacy_processing import process_device_observations
 from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_core.config import LoggingSettings
 from netvoyager_core.logging import get_logger, setup_logging

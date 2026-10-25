@@ -6,7 +6,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from netvoyager_analysis.devices.processing import process_device_observations
+from netvoyager_analysis.devices.legacy_processing import process_device_observations
 from netvoyager_analysis.evidence.store import EvidenceStore
 from netvoyager_analysis.findings.store import FindingStore
 from netvoyager_analysis.paloalto.processing import resolve_firewall_identities
