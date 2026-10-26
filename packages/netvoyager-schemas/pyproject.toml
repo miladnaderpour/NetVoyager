@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netvoyager-schemas"
+version = "0.1.0"
+description = "Shared Pydantic input and API contracts for NetVoyager"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.0,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
