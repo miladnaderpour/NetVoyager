@@ -16,7 +16,7 @@ def test_schema_contains_new_attributes():
 def test_stack_physical_and_logical_devices_share_host_and_ip():
     engine, factory = create_engine_and_session_factory("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         logical = Device(record_type="canonical", device_type="logical", logical_key="STACK-LAB", hostname="STACK-LAB", management_ip="192.0.2.4")
         member1 = Device(record_type="canonical", device_type="physical", serial_number="SERIAL-A", hostname="STACK-LAB", management_ip="192.0.2.4")
         member2 = Device(record_type="canonical", device_type="physical", serial_number="SERIAL-B", hostname="STACK-LAB", management_ip="192.0.2.4")
@@ -29,7 +29,7 @@ def test_stack_physical_and_logical_devices_share_host_and_ip():
 def test_promotion_preserves_identity_and_versions_state():
     engine, factory = create_engine_and_session_factory("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         candidate = Device(record_type="candidate", serial_number="LAB-0001")
         record_creation(uow.session, kind="device", entity=candidate, actor_type="system", actor_id="tester")
         old_id, old_state_id = candidate.id, candidate.state_id

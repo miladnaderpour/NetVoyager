@@ -8,3 +8,5 @@ from .interface import Interface
 from .address_space import AddressSpace
 from .relationships import *
 from .history import *
+
+from . import relationship_validation as _relationship_validation

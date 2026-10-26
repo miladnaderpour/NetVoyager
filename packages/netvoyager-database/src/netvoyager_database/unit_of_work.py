@@ -5,13 +5,16 @@ from .repositories import DeviceRepository, LocationRepository, NetworkPrefixRep
 
 
 class UnitOfWork:
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, *, actor_type=None, actor_id=None, source_id=None, reason=None):
         self._factory = session_factory
+        self._actor = dict(actor_type=actor_type, actor_id=actor_id, source_id=source_id, reason=reason)
         self.session: Session | None = None
         self._committed = False
 
     def __enter__(self):
         self.session = self._factory()
+        if self._actor["actor_id"]:
+            self.session.info["netvoyager_actor"] = self._actor
         self.devices = DeviceRepository(self.session)
         self.locations = LocationRepository(self.session)
         self.network_prefixes = NetworkPrefixRepository(self.session)

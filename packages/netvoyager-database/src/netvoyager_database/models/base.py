@@ -27,6 +27,8 @@ class InventoryRecord:
 
 class RelationMixin:
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    record_type: Mapped[str] = mapped_column(String(20), nullable=False, default='observation')
+    state_id: Mapped[str] = mapped_column(String(36), nullable=False, default=new_id)
     status: Mapped[str] = mapped_column(String(20), default='observed')
     relation_type: Mapped[str | None] = mapped_column(String(80))
     source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey('sources.id'))

@@ -47,3 +47,31 @@ No migrations run automatically on application startup. Test-only `Base.metadata
 ## Scope
 
 This prototype proves ORM models, schema, relationships, audit, and transactions. It does not include the old Analysis pipeline or any migration of real inventory. Generic cross-domain provenance links are validated at the application level rather than by SQL foreign keys.
+
+## Automatic ORM audit (Step 2)
+
+Tracked creation and accepted changes to inventory entities and relationships
+create `EntityEvent` records during SQLAlchemy `before_flush`. These share the
+same SQL transaction as the corresponding update. A meaningful change advances
+`state_id`; a no-op or `last_seen` refresh does not. Observation records and
+audit events cannot be changed or deleted. To protect audit completeness,
+inventory rows cannot be hard-deleted through ORM sessions; retire them via an
+audited state change.
+
+Provide a verified actor when creating the Unit of Work:
+
+```python
+with UnitOfWork(session_factory, actor_type="system", actor_id="my-import-job", reason="Source import") as uow:
+    uow.session.add(device)
+    uow.commit()
+```
+
+For direct SQLAlchemy Sessions, supply `session.info["netvoyager_actor"]` with
+`actor_type` and `actor_id` before changing audited ORM records. Do not claim
+that model code authenticates an actor: the calling application must validate
+actor identity and policy authorization. Existing explicit `record_creation`,
+`promote_candidate`, and `update_relationship` helpers keep their event writes
+without duplicating those events in the automatic hook.
+
+The hook does not audit raw SQL writes or database-external changes, and is
+not a substitute for database-level security against direct tampering.

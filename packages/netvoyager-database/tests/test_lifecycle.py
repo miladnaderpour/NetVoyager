@@ -19,7 +19,7 @@ def test_five_primary_tables(environment):
 
 def test_observation_candidate_promotion_history(environment):
     _,factory=environment
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         source=Source(name='test_excel',source_type='excel')
         uow.session.add(source);uow.session.flush()
         observation=Device(record_type='observation',serial_number='000123456',source_id=source.id)
@@ -38,7 +38,7 @@ def test_observation_candidate_promotion_history(environment):
 
 def test_rollback_is_atomic(environment):
     _,factory=environment
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         record_creation(uow.session,kind='device',entity=Device(record_type='candidate',serial_number='TEST-1'),actor_type='system',actor_id='test')
         # no commit
     with factory() as s:
@@ -47,7 +47,7 @@ def test_rollback_is_atomic(environment):
 
 def test_cannot_promote_observation(environment):
     _,factory=environment
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         obs=Device(record_type='observation',serial_number='TEST-1')
         record_creation(uow.session,kind='device',entity=obs,actor_type='system',actor_id='test')
         with pytest.raises(ValueError,match='Only candidates'):
@@ -55,6 +55,6 @@ def test_cannot_promote_observation(environment):
 
 def test_authorized_actor_is_required(environment):
     _,factory=environment
-    with UnitOfWork(factory) as uow:
+    with UnitOfWork(factory, actor_type="system", actor_id="synthetic-test") as uow:
         with pytest.raises(ValueError,match='identified'):
             record_creation(uow.session,kind='device',entity=Device(record_type='candidate',serial_number='TEST-1'),actor_type='system',actor_id='')

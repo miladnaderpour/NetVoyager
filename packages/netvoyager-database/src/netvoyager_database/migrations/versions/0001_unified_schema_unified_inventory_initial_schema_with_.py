@@ -1,12 +1,12 @@
-"""initial unified inventory schema
+"""unified inventory initial schema with relationships
 
-Revision ID: 0001_unified_inventory
+Revision ID: 0001_unified_schema
 Revises: 
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = '0001_unified_inventory'
+revision = '0001_unified_schema'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -52,16 +52,23 @@ def upgrade():
     sa.Column('name', sa.String(length=255), nullable=True),
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('source_id', sa.String(length=36), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_as_record_type'),
+    sa.CheckConstraint('asn BETWEEN 0 AND 4294967295', name='ck_asn_range'),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('autonomous_systems', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_asn', ['asn'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('devices',
+    sa.Column('device_type', sa.String(length=20), nullable=False),
+    sa.Column('logical_key', sa.String(length=255), nullable=True),
     sa.Column('name', sa.String(length=255), nullable=True),
     sa.Column('hostname', sa.String(length=255), nullable=True),
     sa.Column('serial_number', sa.String(length=255), nullable=True),
@@ -74,23 +81,30 @@ def upgrade():
     sa.Column('software_version', sa.String(length=255), nullable=True),
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('source_id', sa.String(length=36), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("device_type IN ('physical','logical')", name='ck_device_type'),
+    sa.CheckConstraint("record_type != 'canonical' OR (device_type = 'physical' AND serial_number IS NOT NULL AND length(trim(serial_number)) > 0) OR (device_type = 'logical' AND logical_key IS NOT NULL AND length(trim(logical_key)) > 0)", name='ck_canonical_device_identity'),
     sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_device_record_type'),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('devices', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_devices_serial_number'), ['serial_number'], unique=False)
+        batch_op.create_index('uq_canonical_logical_key', ['logical_key'], unique=True, sqlite_where=sa.text("record_type = 'canonical' AND device_type = 'logical'"))
+        batch_op.create_index('uq_canonical_physical_serial', ['serial_number'], unique=True, sqlite_where=sa.text("record_type = 'canonical' AND device_type = 'physical'"))
 
     op.create_table('entity_events',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('entity_kind', sa.String(length=40), nullable=False),
     sa.Column('entity_id', sa.String(length=36), nullable=False),
     sa.Column('event_type', sa.String(length=80), nullable=False),
+    sa.Column('previous_state_id', sa.String(length=36), nullable=True),
+    sa.Column('new_state_id', sa.String(length=36), nullable=True),
     sa.Column('from_type', sa.String(length=20), nullable=True),
     sa.Column('to_type', sa.String(length=20), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
@@ -118,59 +132,90 @@ def upgrade():
     sa.Column('code', sa.String(length=100), nullable=True),
     sa.Column('name', sa.String(length=255), nullable=True),
     sa.Column('location_type', sa.String(length=80), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
     sa.Column('parent_location_id', sa.String(length=36), nullable=True),
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('source_id', sa.String(length=36), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("record_type != 'canonical' OR (code IS NOT NULL AND length(trim(code)) > 0)", name='ck_canonical_location_code'),
     sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_location_record_type'),
+    sa.CheckConstraint('parent_location_id IS NULL OR parent_location_id != id', name='ck_location_not_self_parent'),
     sa.ForeignKeyConstraint(['parent_location_id'], ['locations.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('locations', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_location_code', ['code'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('network_prefixes',
     sa.Column('cidr', sa.String(length=50), nullable=False),
     sa.Column('address_space_id', sa.String(length=36), nullable=True),
+    sa.Column('vrf', sa.String(length=255), nullable=True),
+    sa.Column('vlan', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(length=80), nullable=True),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('source_id', sa.String(length=36), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("record_type != 'canonical' OR address_space_id IS NOT NULL", name='ck_canonical_prefix_address_space'),
     sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_prefix_record_type'),
+    sa.CheckConstraint('vlan IS NULL OR (vlan BETWEEN 1 AND 4094)', name='ck_prefix_vlan'),
     sa.ForeignKeyConstraint(['address_space_id'], ['address_spaces.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('network_prefixes', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_prefix_address_space_cidr', ['address_space_id', 'cidr'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('as_devices',
     sa.Column('as_id', sa.String(length=36), nullable=False),
     sa.Column('device_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_as_devices_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_as_devices_record_type'),
     sa.ForeignKeyConstraint(['as_id'], ['autonomous_systems.id'], ),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('as_devices', schema=None) as batch_op:
+        batch_op.create_index('uq_as_devices_canonical', ['as_id', 'device_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('device_connections',
     sa.Column('device_a_id', sa.String(length=36), nullable=False),
     sa.Column('device_b_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_device_connection_canonical_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_device_connection_record_type'),
+    sa.CheckConstraint('device_a_id < device_b_id', name='ck_device_connection_order'),
     sa.ForeignKeyConstraint(['device_a_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['device_b_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('device_connections', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_device_connection', ['device_a_id', 'device_b_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('interfaces',
     sa.Column('device_id', sa.String(length=36), nullable=True),
     sa.Column('name', sa.String(length=255), nullable=False),
@@ -178,109 +223,195 @@ def upgrade():
     sa.Column('interface_type', sa.String(length=80), nullable=True),
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('source_id', sa.String(length=36), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_seen', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("record_type != 'canonical' OR device_id IS NOT NULL", name='ck_canonical_interface_device'),
     sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_interface_record_type'),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('interfaces', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_device_interface_name', ['device_id', 'name'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('location_devices',
     sa.Column('location_id', sa.String(length=36), nullable=False),
     sa.Column('device_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_location_devices_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_location_devices_record_type'),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['location_id'], ['locations.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('location_devices', schema=None) as batch_op:
+        batch_op.create_index('uq_location_devices_canonical', ['location_id', 'device_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('prefix_as',
     sa.Column('prefix_id', sa.String(length=36), nullable=False),
     sa.Column('as_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_prefix_as_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_prefix_as_record_type'),
     sa.ForeignKeyConstraint(['as_id'], ['autonomous_systems.id'], ),
     sa.ForeignKeyConstraint(['prefix_id'], ['network_prefixes.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('prefix_as', schema=None) as batch_op:
+        batch_op.create_index('uq_prefix_as_canonical', ['prefix_id', 'as_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('prefix_devices',
     sa.Column('prefix_id', sa.String(length=36), nullable=False),
     sa.Column('device_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_prefix_devices_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_prefix_devices_record_type'),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
     sa.ForeignKeyConstraint(['prefix_id'], ['network_prefixes.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('prefix_devices', schema=None) as batch_op:
+        batch_op.create_index('uq_prefix_devices_canonical', ['prefix_id', 'device_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('prefix_locations',
     sa.Column('prefix_id', sa.String(length=36), nullable=False),
     sa.Column('location_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_prefix_locations_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_prefix_locations_record_type'),
     sa.ForeignKeyConstraint(['location_id'], ['locations.id'], ),
     sa.ForeignKeyConstraint(['prefix_id'], ['network_prefixes.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('device_interfaces',
-    sa.Column('device_id', sa.String(length=36), nullable=False),
-    sa.Column('interface_id', sa.String(length=36), nullable=False),
+    with op.batch_alter_table('prefix_locations', schema=None) as batch_op:
+        batch_op.create_index('uq_prefix_locations_canonical', ['prefix_id', 'location_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
+    op.create_table('interface_connections',
+    sa.Column('interface_a_id', sa.String(length=36), nullable=False),
+    sa.Column('interface_b_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
-    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
-    sa.ForeignKeyConstraint(['interface_id'], ['interfaces.id'], ),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_interface_connection_canonical_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_interface_connection_record_type'),
+    sa.CheckConstraint('interface_a_id < interface_b_id', name='ck_interface_connection_order'),
+    sa.ForeignKeyConstraint(['interface_a_id'], ['interfaces.id'], ),
+    sa.ForeignKeyConstraint(['interface_b_id'], ['interfaces.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('interface_connections', schema=None) as batch_op:
+        batch_op.create_index('uq_canonical_interface_connection', ['interface_a_id', 'interface_b_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.create_table('interface_prefixes',
     sa.Column('interface_id', sa.String(length=36), nullable=False),
     sa.Column('prefix_id', sa.String(length=36), nullable=False),
     sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('record_type', sa.String(length=20), nullable=False),
+    sa.Column('state_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('relation_type', sa.String(length=80), nullable=True),
     sa.Column('source_id', sa.String(length=36), nullable=True),
+    sa.CheckConstraint("record_type != 'canonical' OR relation_type IS NOT NULL", name='ck_interface_prefixes_canonical_relation_type'),
+    sa.CheckConstraint("record_type IN ('observation','candidate','canonical')", name='ck_interface_prefixes_record_type'),
     sa.ForeignKeyConstraint(['interface_id'], ['interfaces.id'], ),
     sa.ForeignKeyConstraint(['prefix_id'], ['network_prefixes.id'], ),
     sa.ForeignKeyConstraint(['source_id'], ['sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    with op.batch_alter_table('interface_prefixes', schema=None) as batch_op:
+        batch_op.create_index('uq_interface_prefixes_canonical', ['interface_id', 'prefix_id', 'relation_type'], unique=True, sqlite_where=sa.text("record_type = 'canonical'"))
+
     # ### end Alembic commands ###
 
 def downgrade():
     # ### commands auto generated by Alembic - please adjust! ###
+    with op.batch_alter_table('interface_prefixes', schema=None) as batch_op:
+        batch_op.drop_index('uq_interface_prefixes_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('interface_prefixes')
-    op.drop_table('device_interfaces')
+    with op.batch_alter_table('interface_connections', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_interface_connection', sqlite_where=sa.text("record_type = 'canonical'"))
+
+    op.drop_table('interface_connections')
+    with op.batch_alter_table('prefix_locations', schema=None) as batch_op:
+        batch_op.drop_index('uq_prefix_locations_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('prefix_locations')
+    with op.batch_alter_table('prefix_devices', schema=None) as batch_op:
+        batch_op.drop_index('uq_prefix_devices_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('prefix_devices')
+    with op.batch_alter_table('prefix_as', schema=None) as batch_op:
+        batch_op.drop_index('uq_prefix_as_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('prefix_as')
+    with op.batch_alter_table('location_devices', schema=None) as batch_op:
+        batch_op.drop_index('uq_location_devices_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('location_devices')
+    with op.batch_alter_table('interfaces', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_device_interface_name', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('interfaces')
+    with op.batch_alter_table('device_connections', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_device_connection', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('device_connections')
+    with op.batch_alter_table('as_devices', schema=None) as batch_op:
+        batch_op.drop_index('uq_as_devices_canonical', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('as_devices')
+    with op.batch_alter_table('network_prefixes', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_prefix_address_space_cidr', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('network_prefixes')
+    with op.batch_alter_table('locations', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_location_code', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('locations')
     op.drop_table('evidence')
     op.drop_table('entity_events')
     with op.batch_alter_table('devices', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_physical_serial', sqlite_where=sa.text("record_type = 'canonical' AND device_type = 'physical'"))
+        batch_op.drop_index('uq_canonical_logical_key', sqlite_where=sa.text("record_type = 'canonical' AND device_type = 'logical'"))
         batch_op.drop_index(batch_op.f('ix_devices_serial_number'))
 
     op.drop_table('devices')
+    with op.batch_alter_table('autonomous_systems', schema=None) as batch_op:
+        batch_op.drop_index('uq_canonical_asn', sqlite_where=sa.text("record_type = 'canonical'"))
+
     op.drop_table('autonomous_systems')
     op.drop_table('sources')
     op.drop_table('findings')
