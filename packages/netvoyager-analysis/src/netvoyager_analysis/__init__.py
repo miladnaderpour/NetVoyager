@@ -1,1 +1,1 @@
-"""Network analysis, correlation, and evidence for NetVoyager."""
+"""NetVoyager analysis package — clean V1 starting point."""

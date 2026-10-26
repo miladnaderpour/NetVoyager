@@ -13,14 +13,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
-from uuid import UUID
+from uuid import UUID, uuid5
 
-from netvoyager_network.ipam.address_space import GLOBAL_ADDRESS_SPACE
+# Preserve the historical global AddressSpace identity without depending on
+# the retired network package. Persisted AddressSpace records must use this ID.
+GLOBAL_ADDRESS_SPACE_ID = uuid5(
+    UUID("a2ff2ef8-7277-4d19-9154-a36d97821fc9"),
+    "address-space:global",
+)
 
 
 DEFAULT_VIRTUAL_ROUTER_MAPPINGS: Mapping[str, UUID] = MappingProxyType(
     {
-        "vpn_intern": GLOBAL_ADDRESS_SPACE.id,
+        "vpn_intern": GLOBAL_ADDRESS_SPACE_ID,
     }
 )
 

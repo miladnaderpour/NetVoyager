@@ -5,13 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "netvoyager-analysis"
 version = "0.1.0"
-description = "Network analysis, correlation, and evidence models for NetVoyager"
+description = "NetVoyager analysis processing (fresh unified-ORM implementation)"
 requires-python = ">=3.11"
 dependencies = [
     "netvoyager-core>=0.1.0",
-    "netvoyager-network>=0.1.0",
-    "netvoyager-intelligence>=0.1.0",
-    "PyYAML>=6.0,<7",
+    "netvoyager-database>=0.1.0",
 ]
 
 [tool.setuptools.packages.find]
